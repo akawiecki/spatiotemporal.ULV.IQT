@@ -1,0 +1,1307 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, warning=FALSE, message=FALSE}
+library(pacman)
+pacman::p_load(
+  INLA, tidyverse, sf, lubridate, parallel, here,
+  patchwork, RColorBrewer
+)
+```
+
+
+### number of study households in each experiment
+
+In the sample data set I randomly selected 20 points inside the spray zone and 10 points in the buffer zone for a total of 30 household locations in each study.
+
+```{r how many houses}
+data <- readRDS(here("analysis", "data", "raw_data", "data.sample.rds"))
+
+data <- data %>%
+  select(c("location_code", "exp")) %>%
+  st_drop_geometry()
+
+nrow(data %>%
+  filter(exp == "2014") %>%
+  distinct())
+
+nrow(data %>%
+  filter(exp == "2013") %>%
+  distinct())
+```
+
+### number of study time points in each experiment
+
+```{r timepoints}
+data <- readRDS(here("analysis", "data", "raw_data", "data.sample.rds"))
+
+data <- data %>%
+  select(c("date", "exp")) %>%
+  st_drop_geometry()
+
+
+data.13 <- data %>%
+  filter(exp == "2013")
+
+data.14 <- data %>%
+  filter(exp == "2014")
+
+range(data.13$date)
+length(unique(data.13$date))
+
+data.14 <- data %>%
+  filter(exp == "2014")
+
+range(data.14$date)
+length(unique(data.14$date))
+```
+
+
+# Within-household spray effects (*a*)
+
+## Visual representation of decay functions used to calculate candidate *a* variables
+
+```{r days}
+days <- seq(0, 60, by = 1)
+```
+
+```{r Gaussian decay time }
+# create vector of candidate sigma values
+# 1,3,5,7,10,15,20,25,30,35,40,50,60,80
+sigma.time <- c(seq(1, 7, by = 2), seq(10, 40, by = 5), seq(50, 60, by = 10), 80)
+
+
+#' Create data frame with weight values according to Gaussian decay functions for time
+#'
+#' This function takes vector of candidate sigma values as input and returns data frame with weight values given a Gaussian function
+#' The value of days is required in the environment
+#'
+#' @param m A vector of candidate sigma values
+#' @return A data frame of the fixed effects for each model.
+#'
+f.gauss.time <- function(sigma) {
+  y <- as.data.frame(days) %>% mutate(
+    curve = paste("sigma", sigma, sep = "="),
+    varying.parameter = as.factor(sigma),
+    y = exp(-(days^2) / (2 * sigma^2)),
+    formula = "exp(-(days^2)/(2*sigma^2))",
+    equation = paste("exp(-(days^2)/(2*", sigma, "^2)", sep = "")
+  )
+}
+
+d.gauss.time <- lapply(sigma.time, f.gauss.time) %>%
+  bind_rows() %>%
+  mutate(decay = "Gaussian")
+
+
+p.gauss.time <- ggplot(d.gauss.time, aes(x = days, y = y)) +
+  geom_line(aes(linetype = formula, color = varying.parameter)) +
+  theme_bw()
+p.gauss.time
+```
+
+
+```{r exponential decay time }
+# create vector of candidate k values
+k.time <- c(0.005, 0.010, 0.015, 0.020, 0.030, 0.040, 0.060, 0.100, 0.200, 0.400, 1.000)
+
+
+#' Create data frame with weight values according to exponential decay functions for time
+#'
+#' This function takes vector of candidate sigma values as input and returns data frame with weight values given a exponential function
+#' The value of days is required in the environment
+#'
+#' @param m A vector of candidate sigma values
+#' @return A data frame of the fixed effects for each model.
+#'
+f.exp.time <- function(k) {
+  y2 <- as.data.frame(days) %>% mutate(
+    curve = paste("k", k, sep = "="),
+    varying.parameter = as.factor(k),
+    y = exp(-(k) * (days)),
+    formula = "exp(-(k)*(days))",
+    equation = paste("exp(-(", k, ")*(days))", sep = "")
+  )
+}
+
+d.exp.time <- lapply(k.time, f.exp.time) %>%
+  bind_rows() %>%
+  mutate(decay = "Exponential")
+
+p.exp.time <- ggplot(d.exp.time, aes(x = days, y = y, color = varying.parameter)) +
+  geom_line(aes(linetype = formula)) +
+  theme_bw()
+p.exp.time
+```
+
+
+```{r inverse decay time  }
+# Create data frame with weight values according to the inverse decay function
+d.inv.time <- as.data.frame(days) %>%
+  mutate(
+    curve = "Inverse",
+    varying.parameter = "days",
+    y = 1 / days,
+    formula = "1/days",
+    equation = "1/days"
+  ) %>%
+  mutate(decay = "Inverse")
+
+p.inv.time <- ggplot(d.inv.time, aes(x = days, y = y)) +
+  geom_line() +
+  theme_bw()
+p.inv.time
+```
+
+```{r all decays}
+# bring together all the decay data frames into a single data frame that can be used to plot all the decay curves
+d.time <- bind_rows(d.exp.time, d.gauss.time, d.inv.time)
+
+saveRDS(d.time, here("analysis", "data", "derived_data", "results", "decay.time.rds"))
+```
+
+## Models measuring within-household spray effects (*a*) 
+
+```{r read in time model outputs}
+# read in WAIC output from models measuring within-household spray effects
+waic.time.13.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "waic.time.13.rds")) %>%
+  mutate(experiment = "2013")
+
+waic.time.14.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "waic.time.14.rds")) %>%
+  mutate(experiment = "2014")
+
+# read in fixed effect estimate output from models measuring within-household spray effects
+f.e.time.13.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "f.e.time.13.rds")) %>%
+  mutate(experiment = "2013")
+
+f.e.time.14.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "f.e.time.14.rds")) %>%
+  mutate(experiment = "2014")
+```
+
+```{r modify variable names on the within household model outputs for 2013 }
+# modify variable names on the within household model outputs for 2013
+
+waic.time.13 <- waic.time.13.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(fixed.all = str_replace(fixed, "vble", fixed.s)) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # compare_vbles= identifies the models as have only the random effects or also a fixed effect (a) measuring spray effect over time
+  mutate(compare_vbles = case_when(
+    fixed == "Intercept" ~ "random",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("random", "time"))) %>%
+  arrange(rank_waic) %>% # First sort by val. This sort the dataframe but NOT the factor levels
+  mutate(fixed.s = factor(fixed.s, levels = fixed.s)) %>%
+  # waic.difference.from.best.model= categorizes the models as the best-fitting model,
+  # a model with difference in WAIC not significantly different from the best-fitting model,
+  # or a model with difference in WAIC significantly different from the best-fitting model
+  mutate(waic.difference.from.best.model = case_when(
+    ci.d.l < 0 ~ "No significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Best model",
+    TRUE ~ "Significant difference"
+  ))
+
+
+f.e.time.13 <- f.e.time.13.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(
+    fixed.all = str_replace(fixed, "vble", fixed.s),
+    # value that identifies only the fixed effect included in the model
+    variable = str_replace(variable, "vble", fixed.s)
+  ) %>%
+  filter(variable != "Intercept") %>%
+  select(c("variable", "mean", "sd", "q0.025", "q0.5", "q0.975", "mode", "kld", "random", "fixed.s", "m", "experiment")) %>%
+  # joins to waic output
+  left_join(waic.time.13[, c("rank_waic", "waic", "s.e", "ci.l", "ci.u", "m", "compare_vbles", "waic.difference.from.best.model")], by = "m")
+```
+
+
+```{r modify variable names on the within household model outputs for 2014 }
+# modify variable names on the within household model outputs for 2014
+waic.time.14 <- waic.time.14.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(fixed.all = str_replace(fixed, "vble", fixed.s)) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # compare_vbles= identifies the models as have only the random effects or also a fixed effect (a) measuring spray effect over time
+  mutate(compare_vbles = case_when(
+    fixed == "Intercept" ~ "random",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("random", "time"))) %>%
+  arrange(rank_waic) %>% # First sort by val. This sort the dataframe but NOT the factor levels
+  mutate(fixed.s = factor(fixed.s, levels = fixed.s)) %>%
+  # waic.difference.from.best.model= categorizes the models as the best-fitting model,
+  # a model with difference in WAIC not significantly different from the best-fitting model,
+  # or a model with difference in WAIC significantly different from the best-fitting model
+  mutate(waic.difference.from.best.model = case_when(
+    ci.d.l < 0 ~ "No significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Best model",
+    TRUE ~ "Significant difference"
+  ))
+
+
+f.e.time.14 <- f.e.time.14.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(
+    fixed.all = str_replace(fixed, "vble", fixed.s),
+    # value that identifies only the fixed effect included in the model
+    variable = str_replace(variable, "vble", fixed.s)
+  ) %>%
+  filter(variable != "Intercept") %>%
+  select(c("variable", "mean", "sd", "q0.025", "q0.5", "q0.975", "mode", "kld", "random", "fixed.s", "m", "experiment")) %>%
+  # joins to waic output
+  left_join(waic.time.14[, c("rank_waic", "waic", "s.e", "ci.l", "ci.u", "m", "compare_vbles", "waic.difference.from.best.model")], by = "m")
+```
+
+```{r save modified within household spray effect model WAIC }
+# create a single data frame that includes the WAIC information from both 2013 and 2014
+# and add informative columns that further describe the variables used in each model
+
+waic.time <- bind_rows(waic.time.13, waic.time.14) %>%
+  # model.structure= indicates whether the model has only random effects,
+  # a variable for within_household spray effects
+  # a variable for within_household spray effects and a variable for effects of sprays in the surrounding houses
+  mutate(model.structure = case_when(
+    str_detect(fixed, "g20_day.max+") == TRUE ~ "yi = random.effect + time.since.spray + surrounding.sprays",
+    fixed == "Intercept" ~ "yi = random.effect",
+    TRUE ~ "yi = random.effect + time.since.spray"
+  )) %>%
+  mutate(model.structure = factor(model.structure, levels = c("yi = random.effect", "yi = random.effect + time.since.spray", "yi = random.effect + time.since.spray + surrounding.sprays"))) %>%
+  # decay= which decay function was used if any
+  mutate(decay = case_when(
+    str_detect(fixed.s, "^e") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Exponential",
+    str_detect(fixed.s, "^g") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Gaussian",
+    str_detect(fixed.s, "^i_") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Inverse",
+    TRUE ~ "categorical"
+  )) %>%
+  # varying.parameter= if a decay function was used which varying parameter (sigma or k) was used
+  mutate(varying.parameter = as.factor(gsub(
+    "^e", "",
+    gsub(
+      "^g", "",
+      gsub(
+        "_total$", "",
+        gsub(
+          "_day$", "",
+          gsub(
+            "_day.max$", "",
+            fixed.s
+          )
+        )
+      )
+    )
+  ))) %>%
+  mutate(varying.parameter = as.factor(gsub(
+    "^20_day.max +", "",
+    varying.parameter
+  ))) %>%
+  # spray.effect.weight.type=
+  # is the variable a discrete and continuous measures of a ("Categorical"),
+  # or does it assign a weight to the time since spray based on a decay function,
+  # and if so is it time since the most recent spray ("Most recent spray")
+  # or a cumulative measure of all previous sprays ("Cumulative of sequential sprays")
+
+  mutate(spray.effect.weight.type = case_when(
+    compare_vbles == "time" & (str_detect(fixed.s, "_day.max") == TRUE | str_detect(fixed.s, "_w.max") == TRUE) ~ "Most recent spray",
+    compare_vbles == "time" & (str_detect(fixed.s, "_day") == TRUE | str_detect(fixed.s, "_w") == TRUE) ~ "Cumulative of sequential sprays",
+    TRUE ~ "Categorical"
+  )) %>%
+  # spray.effect= if a decay function was used to calculate vairable a
+  # specify the decay function and the varying parameter used
+  mutate(spray.effect = case_when(
+    (decay == "Gaussian" | decay == "Exponential" | decay == "Inverse") ~ as.character(paste(decay, varying.parameter, spray.effect.weight.type, sep = " ")),
+    TRUE ~ as.character(varying.parameter)
+  )) %>%
+  # spray.effect= describe with words what variables mean
+  mutate(
+    spray.effect =
+      gsub(
+        "spray.", "sprayed ",
+        gsub(
+          ".lag", "s ago",
+          spray.effect
+        )
+      )
+  ) %>%
+  mutate(spray.effect = case_when(
+    varying.parameter == "w.min" ~ "weeks since most recent spray",
+    varying.parameter == "day.min" ~ "days since most recent spray",
+    varying.parameter == "n.spray.by.date" ~ "number of previous sprays",
+    varying.parameter == "spray.by.date" ~ "previous spray yes/no",
+    TRUE ~ spray.effect
+  )) %>%
+  mutate(spray.effect = gsub("1weeks", "1week", spray.effect)) %>%
+  # spray.effect.type= less informative than spray.effect but more than varying.parameter
+  mutate(spray.effect.type = case_when(
+    (decay == "Gaussian" | decay == "Exponential" | decay == "Inverse") ~ as.character(paste(decay, varying.parameter, sep = " ")),
+    TRUE ~ spray.effect
+  )) %>%
+  # calculate the average WAIC ranks across the 2 experiments to find the best fitting common model
+  group_by(fixed.s) %>%
+  mutate(avg.rank.waic = mean(rank_waic)) %>%
+  arrange(avg.rank.waic) %>% 
+  ungroup()
+
+#the model with the best average rank across the two experiments 
+# waic.time[1,][["fixed.s"]]
+
+saveRDS(waic.time, here("analysis", "data", "derived_data", "results", "waic.time.rds"))
+```
+
+
+```{r save modified within household spray effect fixed effeect estimates }
+# create a single data frame that includes the fixed effect estimate information from both 2013 and 2014
+# and add informative columns that further describe the variables used in each model
+
+f.e.time <- bind_rows(f.e.time.13, f.e.time.14) %>%
+  select(c("variable", "mean", "sd", "q0.025", "q0.5", "q0.975", "mode", "kld", "random", "fixed.s", "m", "experiment")) %>%
+  left_join(waic.time[, c(
+    "rank_waic", "waic", "s.e", "ci.l", "ci.u", "m", "compare_vbles",
+    "waic.difference.from.best.model", "model.structure", "decay", "varying.parameter", "spray.effect.weight.type", "spray.effect", "spray.effect.type", "experiment"
+  )], by = c("m", "experiment")) %>%
+  # variable= include informative variable description
+  mutate(variable = case_when(
+    (decay == "Gaussian" | decay == "Exponential" | decay == "Inverse") ~ as.character(paste(decay, varying.parameter, spray.effect.weight.type, sep = " ")),
+    TRUE ~ as.character(variable)
+  )) %>%
+  mutate(variable = case_when(
+    variable == "g20_day.max" ~ "Gaussian 20 most recent in time",
+    variable == "w.min" ~ "weeks since most recent spray",
+    variable == "day.min" ~ "days since most recent spray",
+    variable == "n.spray.by.date" ~ "number of previous sprays",
+    variable == "spray.by.date" ~ "previous spray yes/no",
+    variable == "zonebuffer" ~ "buffer zone",
+    variable == "zonespray" ~ "spray zone",
+    TRUE ~ as.character(variable)
+  )) %>%
+  mutate(
+    variable =
+      gsub(
+        "spray.", "sprayed ",
+        gsub(
+          ".lag", "s ago",
+          variable
+        )
+      )
+  ) %>%
+  mutate(variable = gsub("1weeks", "1week", variable))
+
+
+saveRDS(f.e.time, here("analysis", "data", "derived_data", "results", "f.e.time.rds"))
+```
+
+# Effects of sprays in neighboring households (*b*)
+
+# Visual representation of decay functions used to calculate candidate *b* variables
+
+```{r dist}
+# distance from 1- 500m
+dist <- seq(1, 500, by = 1)
+```
+
+
+```{r Gaussian decay distance }
+sigma.dist <- c(5, seq(25, 150, by = 25), 200, 250, 300)
+
+
+#' Create data frame with weight values according to Gaussian decay functions for distance
+#'
+#' This function takes vector of candidate sigma values as input and returns data frame with weight values given a Gaussian function
+#' The value of dist is required in the environment
+#'
+#' @param m A vector of candidate sigma values
+#' @return A data frame of the fixed effects for each model.
+#'
+f.gauss.dist <- function(sigma) {
+  y1 <- as.data.frame(dist) %>% mutate(
+    curve = paste("sigma", sigma, sep = "="),
+    varying.parameter = as.factor(sigma),
+    y = exp(-(dist^2) / (2 * sigma^2)),
+    formula = "exp(-(dist^2)/(2*sigma^2))",
+    equation = paste("exp(-(dist^2)/(2*", sigma, "^2)", sep = "")
+  )
+}
+
+
+d.gauss.dist <- lapply(sigma.dist, f.gauss.dist) %>%
+  bind_rows() %>%
+  mutate(decay = "Gaussian")
+
+p.gauss.dist <- ggplot(d.gauss.dist, aes(x = dist, y = y)) +
+  geom_line(aes(linetype = formula, color = varying.parameter)) +
+  # geom_label(aes(label = decay), nudge_x = 1, size = 2)
+  theme_bw()
+
+p.gauss.dist
+```
+
+
+
+```{r exponential decay distance }
+k.dist <- c(0.0025, 0.0035, seq(0.005, 0.0125, by = 0.0025), seq(0.02, 0.05, by = 0.025), 0.2)
+
+#' Create data frame with weight values according to exponential decay functions for distance
+#'
+#' This function takes vector of candidate sigma values as input and returns data frame with weight values given a Gaussian function
+#' The value of dist is required in the environment
+#'
+#' @param m A vector of candidate sigma values
+#' @return A data frame of the fixed effects for each model.
+#'
+f.exp.dist <- function(k) {
+  y2 <- as.data.frame(dist) %>% mutate(
+    curve = paste("k", k, sep = "="),
+    varying.parameter = as.factor(k),
+    y = exp(-(k) * (dist)),
+    formula = "exp(-(k)*(dist))",
+    equation = paste("exp(-(", k, ")*(dist))", sep = "")
+  )
+}
+
+
+d.exp.dist <- lapply(k.dist, f.exp.dist) %>%
+  bind_rows() %>%
+  mutate(decay = "Exponential")
+
+p.exp.dist <- ggplot(d.exp.dist, aes(x = dist, y = y, color = varying.parameter)) +
+  geom_line(aes(linetype = formula)) +
+  # geom_label(aes(label = decay), nudge_x = 1, size = 2)
+  theme_bw()
+p.exp.dist
+```
+
+```{r inverse decay for distance }
+d.inv.dist <- as.data.frame(dist) %>%
+  mutate(
+    curve = "Inverse",
+    varying.parameter = "dist",
+    y = 1 / dist,
+    formula = "1/dist",
+    equation = paste("1/dist", sep = "")
+  ) %>%
+  mutate(decay = "Inverse")
+
+p.inv.dist <- ggplot(d.inv.dist, aes(x = dist, y = y)) +
+  geom_line() +
+  theme_bw()
+p.inv.dist
+```
+
+
+```{r all decays dist }
+# bring together all the decay data frames into a single data frame that can be used to plot all the decay curves for distance
+d.dist <- bind_rows(d.exp.dist, d.gauss.dist, d.inv.dist)
+
+saveRDS(d.dist, here("analysis", "data", "derived_data", "results", "decay.distance.rds"))
+```
+
+## Models measuring effects of sprays in neighboring households (*b*) 
+
+```{r read in space model outputs}
+# read in WAIC output from models measuring effects of sprays in neighboring households
+# with the difference in WAIC difference in WAIC between the WAIC of the model selected in the within-household analysis and all other models as baseline
+
+waic.space.13.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "waic.space.13.rds")) %>%
+  mutate(experiment = "2013")
+
+waic.space.14.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "waic.space.14.rds")) %>%
+  mutate(experiment = "2014")
+```
+
+```{r modify variable names on the model outputs of models measuring effects of sprays in neighboring households for 2013 }
+# modify variable names on the model outputs of models measuring effects of sprays in neighboring households for 2013
+
+
+waic.space.13 <- waic.space.13.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(fixed.all = str_replace(fixed, "vble", fixed.s))
+
+waic.space.13 <- waic.space.13 %>%
+  mutate(rank_waic = seq(1:nrow(waic.space.13))) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # compare_vbles= identifies the models as have only a fixed effect (a) measuring spray effect over time (g20_day.max)
+  # or a fixed effect (a) measuring spray effect over time and a fixed effect (b) measuring effects of sprays in neighboring households
+  mutate(compare_vbles = case_when(
+    str_detect(fixed, "g20_day.max+") == TRUE ~ "distance",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("time", "distance"))) %>%
+  arrange(rank_waic) %>% # First sort by val. This sort the dataframe but NOT the factor levels
+  mutate(fixed.s = factor(fixed.s, levels = fixed.s)) %>%
+  # waic.difference.from.g20.model= categorizes the models as the model selected in the within-household analysis (mbest),
+  # a model with difference in WAIC not significantly different from the model selected in the within-household analysis,
+  # or a model with difference in WAIC significantly different from the model selected in the within-household analysis
+  mutate(waic.difference.from.g20.model = case_when(
+    ci.d.u > 0 ~ "No significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Gaussian sigma=20 model",
+    TRUE ~ "Significant difference"
+  ))
+```
+
+
+```{r modify variable names on the model outputs of models measuring effects of sprays in neighboring households for 2013 }
+# modify variable names on the model outputs of models measuring effects of sprays in neighboring households for 2013
+
+
+waic.space.14 <- waic.space.14.raw %>%
+  # value that identifies the model and lists the fixed effects and the intercept
+  mutate(fixed.all = str_replace(fixed, "vble", fixed.s))
+
+waic.space.14 <- waic.space.14 %>%
+  mutate(rank_waic = seq(1:nrow(waic.space.14))) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # compare_vbles= identifies the models as have only a fixed effect (a) measuring spray effect over time (g20_day.max)
+  # or a fixed effect (a) measuring spray effect over time and a fixed effect (b) measuring effects of sprays in neighboring households
+  mutate(compare_vbles = case_when(
+    str_detect(fixed, "g20_day.max+") == TRUE ~ "distance",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("time", "distance"))) %>%
+  arrange(rank_waic) %>% # First sort by val. This sort the dataframe but NOT the factor levels
+  mutate(fixed.s = factor(fixed.s, levels = fixed.s)) %>%
+  # waic.difference.from.g20.model= categorizes the models as the model selected in the within-household analysis (mbest),
+  # a model with difference in WAIC not significantly different from the model selected in the within-household analysis,
+  # or a model with difference in WAIC significantly different from the model selected in the within-household analysis
+  mutate(waic.difference.from.g20.model = case_when(
+    ci.d.u > 0 ~ "No significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Gaussian sigma=20 model",
+    TRUE ~ "Significant difference"
+  ))
+```
+
+
+```{r save the output for models measuring effects of sprays in neighboring households}
+# create a single data frame that includes the WAIC information from both 2013 and 2014
+# and add informative columns that further describe the variables used in each model
+
+waic.space <- bind_rows(waic.space.13, waic.space.14) %>%
+  # model.structure= indicates whether the model has only random effects,
+  # a variable for within_household spray effects
+  # a variable for within_household spray effects and a variable for effects of sprays in the surrounding houses
+  mutate(model.structure = case_when(
+    str_detect(fixed, "g20_day.max+") == TRUE ~ "yi = random.effect + time.since.spray + surrounding.sprays",
+    fixed == "Intercept" ~ "yi = random.effect",
+    TRUE ~ "yi = random.effect + time.since.spray"
+  )) %>%
+  mutate(model.structure = factor(model.structure, levels = c("yi = random.effect", "yi = random.effect + time.since.spray", "yi = random.effect + time.since.spray + surrounding.sprays"))) %>%
+  # decay= which decay function was used if any
+  mutate(decay = case_when(
+    str_detect(fixed.s, "^e") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Exponential",
+    str_detect(fixed.s, "^g") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Gaussian",
+    str_detect(fixed.s, "^i_") == TRUE & str_detect(fixed.s, "0m") == FALSE ~ "Inverse",
+    TRUE ~ "categorical"
+  )) %>%
+  # varying.parameter= if a decay function was used which varying parameter (sigma or k) was used
+  mutate(varying.parameter = as.factor(gsub(
+    "^e", "",
+    gsub(
+      "^g", "",
+      gsub(
+        "_total$", "",
+        gsub(
+          "_day$", "",
+          gsub(
+            "_day.max$", "",
+            fixed.s
+          )
+        )
+      )
+    )
+  ))) %>%
+  # spray.effect.weight.type=
+  # describes if the variable in the model is
+  # is a discrete and continuous measures of a ("categorical"),
+
+  # if the variable assigns a weight value based on a decay function to the time since spray:
+  # if it is a weight of time since the most recent spray ("weight of the most recent spray")
+  # or a cumulative weight of all previous sprays ("cumulative weight of all previous sprays")
+
+  # if the variable assigns a weight value based on a decay function
+  # to the distance between household i and every other household j ("cumulative weight of sprays in the study area")
+
+  # if the variable calculates the proportion of houses sprayed in the previous week
+  # in a given distance ring from household i ("proportion sprayed in ring")
+
+
+  mutate(spray.effect.weight.type = case_when(
+    compare_vbles == "time" & (str_detect(fixed.s, "_day.max") == TRUE) ~ "weight of the most recent spray",
+    compare_vbles == "time" & (str_detect(fixed.s, "_day") == TRUE) ~ "cumulative weight of all previous sprays",
+    compare_vbles == "distance" & str_detect(fixed.s, "_total") == TRUE ~ "cumulative weight of sprays in the study area",
+    compare_vbles == "distance" & str_detect(fixed.s, "g20_day.max") == TRUE ~ "proportion sprayed in ring",
+    TRUE ~ "categorical"
+  )) %>%
+  mutate(varying.parameter = as.factor(gsub(
+    "^20_day.max +", "",
+    varying.parameter
+  ))) %>%
+  # a <- waic.space.1 %>% filter(decay=="categorical") %>% select("varying.parameter") %>% distinct()
+
+  mutate(spray.effect = case_when(
+    decay == "Inverse" & (str_detect(fixed.s, "w") == TRUE) ~ as.character(paste(decay, "week", spray.effect.weight.type, sep = " ")),
+    decay == "Inverse" & (str_detect(fixed.s, "w") != TRUE) ~ as.character(paste(decay, "day", spray.effect.weight.type, sep = " ")),
+    (decay == "Gaussian" | decay == "Exponential") ~ as.character(paste(decay, varying.parameter, spray.effect.weight.type, sep = " ")),
+    TRUE ~ as.character(varying.parameter)
+  )) %>%
+  # spray.effect= adds mode informative variable descriptions
+  mutate(spray.effect = case_when(
+    spray.effect == "+ p30m + p100m + p300m + ptotalm" ~ "prop. sprayed 0-31m + prop. sprayed 31-100m + prop. sprayed 101-300m + prop. sprayed >300m",
+    spray.effect == "+ p30m + p100m + p300m" ~ "prop. sprayed 0-31m + prop. sprayed 31-100m + prop. sprayed 101-300m",
+    spray.effect == "+ p30m + p100m" ~ "prop. sprayed 0-31m + prop. sprayed 31-100m",
+    spray.effect == "+ p30m" ~ "prop. sprayed 0-31m",
+    spray.effect == "+ p100m + p200m + p300m + p400m + p500m +ptotalm" ~ "prop. sprayed 0-100m + prop. sprayed 101-200m + prop. sprayed 201-300m + prop. sprayed 301-400m + prop. sprayed 401-500m + prop.sprayed >500m",
+    spray.effect == "+ p100m + p200m + p300m + p400m + p500m" ~ "prop. sprayed 0-100m + prop. sprayed 101-200m + prop. sprayed 201-300m + prop. sprayed 301-400m + prop. sprayed 401-500m",
+    spray.effect == "+ p100m + p200m + p300m + p400m" ~ "prop. sprayed 0-100m + prop. sprayed 101-200m + prop. sprayed 201-300m + prop. sprayed 301-400m",
+    spray.effect == "+ p100m + p200m + p300m" ~ "prop. sprayed 0-100m + prop. sprayed 101-200m + prop. sprayed 201-300m",
+    spray.effect == "+ p100m + p200m" ~ "prop. sprayed 0-100m + prop. sprayed 101-200m",
+    spray.effect == "+ p100m" ~ "prop. sprayed 0-100m",
+    TRUE ~ spray.effect
+  )) %>%
+  mutate(spray.effect = case_when(
+    spray.effect.weight.type == "categorical" ~
+      gsub(
+        "spray.", "sprayed ",
+        gsub(
+          ".lag", "s prior",
+          spray.effect
+        )
+      ),
+    TRUE ~ spray.effect
+  )) %>%
+  mutate(spray.effect = case_when(
+    varying.parameter == "w.min" ~ "weeks since most recent spray",
+    varying.parameter == "day.min" ~ "days since the most recent spray",
+    varying.parameter == "n.spray.by.date" ~ "number of sprays",
+    varying.parameter == "spray.by.date" ~ "sprayed",
+    TRUE ~ spray.effect
+  )) %>%
+  mutate(spray.effect = gsub("1weeks", "1week", spray.effect)) %>%
+  mutate(spray.effect.type = case_when(
+    decay == "Inverse" & (str_detect(fixed.s, "w") == TRUE) ~ as.character(paste(decay, "week", sep = " ")),
+    decay == "Inverse" & (str_detect(fixed.s, "w") != TRUE) ~ as.character(paste(decay, "day", sep = " ")),
+    (decay == "Gaussian" | decay == "Exponential") ~ as.character(paste(decay, varying.parameter, sep = " ")),
+    TRUE ~ spray.effect
+  ))
+
+
+
+saveRDS(waic.space, here("analysis", "data", "derived_data", "results", "waic.space.rds"))
+```
+
+
+
+# Variable tables
+
+Tables that list all variables included in the models 
+
+```{r read in sur model outputs modified}
+decay.time <- readRDS(here("analysis", "data", "derived_data", "results", "decay.time.rds"))
+
+decay.distance <- readRDS(here("analysis", "data", "derived_data", "results", "decay.distance.rds"))
+
+waic.space <- readRDS(here("analysis", "data", "derived_data", "results", "waic.space.rds"))
+
+waic.time <- readRDS(here("analysis", "data", "derived_data", "results", "waic.time.rds"))
+
+f.e.time <- readRDS(here("analysis", "data", "derived_data", "results", "f.e.time.rds"))
+```
+
+```{r curves data }
+# add waic information to the curve plot data frame
+
+# the join with the waic information is different for the inverse decay function and the other functions,
+# so they are performed separately
+curves.model.time.no.inv <- decay.time %>%
+  filter(decay != "Inverse") %>%
+  left_join(waic.time[, c(
+    "rank_waic", "waic", "s.e", "ci.l", "ci.u", "d.mean.waic",
+    "d.s.e", "ci.d.l", "ci.d.u", "m", "compare_vbles",
+    "waic.difference.from.best.model", "model.structure", "decay", "varying.parameter", "spray.effect.weight.type", "spray.effect", "experiment"
+  )], by = c("decay" = "decay", "varying.parameter" = "varying.parameter"))
+
+
+curves.model.time.inv <- decay.time %>%
+  filter(decay == "Inverse") %>%
+  left_join(waic.time[, c(
+    "rank_waic", "waic", "s.e", "ci.l", "ci.u", "d.mean.waic",
+    "d.s.e", "ci.d.l", "ci.d.u", "m", "compare_vbles",
+    "waic.difference.from.best.model", "model.structure", "decay", "spray.effect.weight.type", "spray.effect", "experiment"
+  )], by = c("decay" = "decay"))
+
+
+
+curves.model.time <- bind_rows(curves.model.time.no.inv, curves.model.time.inv) %>%
+  # mutate(rank_waic= as.factor(rank_waic)) %>%
+  # equation.best.5.waic = if the model is among the top 5 best-fitting models,
+  # populate with the function equation
+  mutate(equation.best.5.waic = case_when(
+    rank_waic %in% seq(1:5) ~ equation,
+    TRUE ~ "other"
+  )) %>%
+  # best.waic=if the model is among the top 5 best-fitting models,
+  # populate with the waic rank
+  mutate(best.waic = case_when(
+    rank_waic %in% seq(1:5) ~ as.character(rank_waic),
+    TRUE ~ "other"
+  )) %>%
+  # alpha = allows different levels of transparency
+  mutate(alpha = case_when(
+    best.waic == "other" ~ 0.95,
+    TRUE ~ 1
+  ))
+
+saveRDS(curves.model.time, here("analysis", "data", "derived_data", "results", "curves.model.time.rds"))
+```
+
+```{r variable table for effects of sprays }
+# varying parameters and decay functions used for within-household spray effects
+d.time.equations <- distinct(decay.time %>%
+  select(
+    "curve", "varying.parameter", "formula", "equation",
+    "decay"
+  )) %>%
+  group_by(decay) %>%
+  summarise(varying.parameter.values = paste(varying.parameter, collapse = ",")) %>%
+  mutate(compare_vbles = "time")
+
+# varying parameters and decay functions used for spray effects of the surrounding households
+d.dist.equations <- distinct(decay.distance %>%
+  select(
+    "curve", "varying.parameter", "formula", "equation",
+    "decay"
+  )) %>%
+  group_by(decay) %>%
+  summarise(varying.parameter.values = paste(varying.parameter, collapse = ",")) %>%
+  mutate(compare_vbles = "distance")
+
+# varying parameters and decay functions for all spray effects calculated using decay functions
+d.equations <- bind_rows(d.time.equations, d.dist.equations) %>%
+  mutate(varying.parameter.values = gsub(
+    "dist", "",
+    gsub("days", "", varying.parameter.values)
+  ))
+
+# description of continuous and discrete variables for both time and space
+effects.categorical <- waic.space %>%
+  filter((spray.effect.weight.type == "categorical" | spray.effect.weight.type == "proportion sprayed in ring") & experiment == "2013") %>%
+  select(c(
+    "compare_vbles",
+    "decay", "spray.effect.weight.type", "spray.effect"
+  )) %>%
+  arrange(compare_vbles, spray.effect) %>%
+  mutate(description = case_when(
+    spray.effect == "zone" ~ "spray zone/buffer zone",
+    spray.effect == "sprayed" ~ "was house i sprayed previously? yes/no",
+    spray.effect == "number of sprays" ~ "how many times was house i sprayed previously? 1,2...6",
+    spray.effect == "days since the most recent spray" ~ "$max(\\Delta t_{c})$",
+    spray.effect == "weeks since most recent spray" ~ "$\\frac{max(\\Delta t_{c})}{7}$",
+    str_detect(spray.effect, "prior +") == TRUE ~ "was house i sprayed in any of the indicated previous weeks?",
+    str_detect(spray.effect, "prior$") == TRUE ~ "was house i sprayed in the indicated previous week?",
+    str_detect(spray.effect, "\\%") == TRUE ~ "proportion of houses sprayed in the previous week within a ring of a given distance from house i"
+  ))
+
+
+# varying parameters and decay function equations for all spray effects calculated using decay functions
+# including descriptions of the variables
+equations.all <- data.frame(
+  decay = c(
+    "Inverse",
+    "Inverse",
+    "Gaussian",
+    "Gaussian",
+    "Exponential",
+    "Exponential",
+    "Inverse",
+    "Gaussian",
+    "Exponential"
+  ),
+  spray.effect.weight.type = c(
+    "cumulative weight of all previous sprays",
+    "weight of the most recent spray",
+    "cumulative weight of all previous sprays",
+    "weight of the most recent spray",
+    "cumulative weight of all previous sprays",
+    "weight of the most recent spray",
+    "cumulative weight of sprays in the study area",
+    "cumulative weight of sprays in the study area",
+    "cumulative weight of sprays in the study area"
+  ),
+  description = c(
+    "$max(\\frac{1}{\\Delta t_{c}})$",
+    "$\\sum_{c=1}^6\\frac{1}{\\Delta t_{c}}$",
+    "$max(e^{-\\frac{\\Delta t_{c}^2}{2\\times\\sigma^2}})$",
+    "$ \\sum_{c=1}^6 e^{-\\frac{\\Delta t_{c}^2}{2\\times\\sigma^2}}$",
+    "$max(e^{-(k \\times \\Delta t_{c})})$",
+    "$\\sum_{c=1}^6 e^{-(k \\times \\Delta t_{c})}$",
+    "$\\sum_{j}(\\frac{1}{d_{ij}}) \\times f_{m_{bestA}}(\\Delta t_{c})$",
+    "$\\sum_{j}(e^{-\\frac{d_{ij}^2}{2\\times\\sigma^2}}) \\times f_{m_{bestA}}(\\Delta t_{c}))$",
+    "$\\sum_{j}(e^{-(k \\times d_{ij})})) \\times f_{m_{bestA}}(\\Delta t_{c}))$"
+  )
+)
+
+
+# for variables using decay functions, further describe each variable
+effects.decay <- waic.space %>%
+  filter((spray.effect.weight.type != "categorical" & spray.effect.weight.type != "proportion sprayed in ring") &
+    experiment == "2013") %>%
+  select(c(
+    "compare_vbles",
+    "decay", "spray.effect.weight.type"
+  )) %>%
+  distinct() %>%
+  left_join(d.equations, by = c("compare_vbles", "decay")) %>%
+  left_join(equations.all, by = c("decay", "spray.effect.weight.type")) %>%
+  mutate(spray.effect = paste(decay, spray.effect.weight.type, sep = " "))
+
+# data frame with descriptors of all the candidate variables used in this analysis
+effects <- bind_rows(effects.categorical, effects.decay)
+
+
+saveRDS(effects, here("analysis", "data", "derived_data", "results", "effects.rds"))
+```
+
+
+# Visual representation of the ring distance schemes 
+
+```{r rings data }
+# import data with all houses within a 1000m buffer of each study household
+gis.buff.14 <- readRDS(here("analysis", "data", "raw_data", "gis.buff.sample.14.rds"))
+
+# extract the study data frame from the data frame that includes all houses within a 1000m buffer of each study household
+study.data <- gis.buff.14 %>%
+  filter(!is.na(exp)) %>%
+  select(c(
+    "location_code", "date", "cycle_1", "cycle_2", "cycle_3", "cycle_4",
+    "cycle_5", "cycle_6", "exp", "zone", "geometry"
+  ))
+
+# choose one of the households to represent household i, as an example
+i <- study.data[which(study.data$location_code == "HTB803" & study.data$date == "2014-04-14"), ]
+
+# assign household i's geolocated point, location code and date of adult survey to objects
+# to be used below
+center.geometry <- i[["geometry"]]
+center.location <- i[["location_code"]]
+center.date <- i[["date"]]
+```
+
+### for example household i, calculate the proportion of houses in each ring that were sprayed in the previous week
+ Do this for both ring distance schemes.
+
+```{r i.bio}
+i.bio <- distinct(gis.buff.14 %>%
+  select(c(
+    "location_code", "zone",
+    "cycle_1", "cycle_2", "cycle_3", "cycle_4", "cycle_5", "cycle_6",
+    "geometry"
+  ))) %>%
+  # dist = the distance (in m) between the household i and every other household j in the study, or dij.
+  mutate(dist = round(as.numeric(st_distance(center.geometry, geometry)))) %>%
+  # diff_c[1-6] = what is the difference in days between the entomological collection date and the date the household was sprayed?
+  # date entomological survey - each of the spray dates in the 6 spray cycles
+  mutate(
+    diff_c1 = ifelse((center.date - cycle_1 + 1) < 1, NA, (center.date - cycle_1 + 1)),
+    diff_c2 = ifelse((center.date - cycle_2 + 1) < 1, NA, (center.date - cycle_2 + 1)),
+    diff_c3 = ifelse((center.date - cycle_3 + 1) < 1, NA, (center.date - cycle_3 + 1)),
+    diff_c4 = ifelse((center.date - cycle_4 + 1) < 1, NA, (center.date - cycle_4 + 1)),
+    diff_c5 = ifelse((center.date - cycle_5 + 1) < 1, NA, (center.date - cycle_5 + 1)),
+    diff_c6 = ifelse((center.date - cycle_6 + 1) < 1, NA, (center.date - cycle_6 + 1))
+  ) %>%
+  # remove household i from the calculations (as we want to add the spray weights of the surrounding houses not counting sprays in household i)
+  filter(location_code != center.location) %>%
+  # create distance rings around household i
+  mutate(ring = case_when(
+    between(dist, 0, 30) ~ "0-30m",
+    between(dist, 31, 100) ~ "31-100m",
+    between(dist, 101, 300) ~ "101-300m",
+    between(dist, 301, 2000) ~ ">300m"
+  )) %>%
+  mutate(ring = factor(ring, levels = c("0-30m", "31-100m", "101-300m", ">300m")))
+
+i.bio <- i.bio %>%
+  # spray.past.w = was household j sprayed in the 7 days (1 week) previous to household i's adult survey time t?
+  # we added +1 to all differences in time so 0 to 7 days before becomes 1 to 8 days before
+  mutate(spray.past.w = if_any(c(diff_c1, diff_c2, diff_c3, diff_c4, diff_c5, diff_c6), ~ (between(.x, 1, 8)))) %>%
+  # turn into TRUE/FALSE variable
+  mutate(spray.past.w = case_when(
+    is.na(spray.past.w) ~ "FALSE",
+    TRUE ~ "TRUE"
+  ))
+
+saveRDS(i.bio, here("analysis", "data", "derived_data", "results", "i.bio.rds"))
+```
+ 
+ 
+ 
+```{r i.100m}
+i.100m <- distinct(gis.buff.14 %>%
+  select(c(
+    "location_code", "zone",
+    "cycle_1", "cycle_2", "cycle_3", "cycle_4", "cycle_5", "cycle_6",
+    "geometry"
+  ))) %>%
+  # dist = the distance (in m) between the household i and every other household j in the study, or dij.
+  mutate(dist = round(as.numeric(st_distance(center.geometry, geometry)))) %>%
+  # diff_c[1-6] = what is the difference in days between the entomological collection date and the date the household was sprayed?
+  # date entomological survey - each of the spray dates in the 6 spray cycles
+  mutate(
+    diff_c1 = ifelse((center.date - cycle_1 + 1) < 1, NA, (center.date - cycle_1 + 1)),
+    diff_c2 = ifelse((center.date - cycle_2 + 1) < 1, NA, (center.date - cycle_2 + 1)),
+    diff_c3 = ifelse((center.date - cycle_3 + 1) < 1, NA, (center.date - cycle_3 + 1)),
+    diff_c4 = ifelse((center.date - cycle_4 + 1) < 1, NA, (center.date - cycle_4 + 1)),
+    diff_c5 = ifelse((center.date - cycle_5 + 1) < 1, NA, (center.date - cycle_5 + 1)),
+    diff_c6 = ifelse((center.date - cycle_6 + 1) < 1, NA, (center.date - cycle_6 + 1))
+  ) %>%
+  # remove household i from the calculations (as we want to add the spray weights of the surrounding houses not counting sprays in household i)
+  filter(location_code != center.location) %>%
+  # create distance rings around household i
+  mutate(ring = case_when(
+    # even distanced rings by 1000m, from 1-500m
+    between(dist, 0, 100) ~ "0-100m",
+    between(dist, 101, 200) ~ "101-200m",
+    between(dist, 201, 300) ~ "201-300m",
+    between(dist, 301, 400) ~ "301-400m",
+    between(dist, 401, 500) ~ "401-500m",
+    between(dist, 501, 2000) ~ ">500m"
+  )) %>%
+  mutate(ring = factor(ring, levels = c("0-100m", "101-200m", "201-300m", "301-400m", "401-500m", ">500m")))
+
+i.100m <- i.100m %>%
+  # spray.past.w = was household j sprayed in the 7 days (1 week) previous to household i's adult survey time t?
+  # we added +1 to all differences in time so 0 to 7 days before becomes 1 to 8 days before
+  mutate(spray.past.w = if_any(c(diff_c1, diff_c2, diff_c3, diff_c4, diff_c5, diff_c6), ~ (between(.x, 1, 8)))) %>%
+  # turn into TRUE/FALSE variable
+  mutate(spray.past.w = case_when(
+    is.na(spray.past.w) ~ "FALSE",
+    TRUE ~ "TRUE"
+  ))
+
+saveRDS(i.100m, here("analysis", "data", "derived_data", "results", "i.100m.rds"))
+```
+
+### For example household i, create distance rings around household i
+
+```{r i.buffer.bio}
+i_buff_30 <- st_buffer(i, dist = 30)
+i_buff_100 <- st_difference(st_buffer(i, dist = 100), st_buffer(i, dist = 30))
+i_buff_300 <- st_difference(st_buffer(i, dist = 300), st_buffer(i, dist = 100))
+i_buff_1000 <- st_difference(st_buffer(i, dist = 1000), st_buffer(i, dist = 300))
+
+
+i.buffer.bio <- data.frame(
+  buff = c(
+    i_buff_30$geometry,
+    i_buff_100$geometry,
+    i_buff_300$geometry,
+    i_buff_1000$geometry
+  ),
+  ring = as.factor(c("0-30m", "31-100m", "101-300m", ">300m"))
+) %>%
+  mutate(ring = fct_relevel(ring, c(">300m", "101-300m", "31-100m", "0-30m"))) %>%
+  st_as_sf()
+
+saveRDS(i.buffer.bio, here("analysis", "data", "derived_data", "results", "i.buffer.bio.rds"))
+```
+
+
+```{r i.buffer.100m}
+i_buff_100 <- st_buffer(i, dist = 100)
+i_buff_200 <- st_difference(st_buffer(i, dist = 200), st_buffer(i, dist = 100))
+i_buff_300 <- st_difference(st_buffer(i, dist = 300), st_buffer(i, dist = 200))
+i_buff_400 <- st_difference(st_buffer(i, dist = 400), st_buffer(i, dist = 300))
+i_buff_500 <- st_difference(st_buffer(i, dist = 500), st_buffer(i, dist = 400))
+i_buff_1000 <- st_difference(st_buffer(i, dist = 1000), st_buffer(i, dist = 500))
+
+
+i.buffer.100m <- data.frame(
+  buff = c(
+    i_buff_100$geometry,
+    i_buff_200$geometry,
+    i_buff_300$geometry,
+    i_buff_400$geometry,
+    i_buff_500$geometry,
+    i_buff_1000$geometry
+  ),
+  ring = as.factor(c("0-100m", "101-200m", "201-300m", "301-400m", "401-500m", ">500m"))
+) %>%
+  mutate(ring = fct_relevel(ring, c(">500m", "401-500m", "301-400m", "201-300m", "101-200m", "0-100m"))) %>%
+  st_as_sf()
+
+saveRDS(i.buffer.100m, here("analysis", "data", "derived_data", "results", "i.buffer.100m.rds"))
+```
+
+
+
+
+# % reduction for *Ae. Aegypti* abundance following sprays
+
+The predictive model uses only fixed effects estimates from $m_{best}$ to estimate *Ae. aegypti* abundance over time.
+
+The random effects (spatial, temporal, and household variations) were each set equal to their mean of zero.
+
+
+```{r data and inla elements for model estimation}
+data <- readRDS(here("analysis", "data", "derived_data", "variables", "variables_2014", "vbles.time.14.rds"))
+```
+
+
+```{r fixed effect prediction data }
+# sequence of days that is used to calculate the gaussian sigma=20 weighted spray effect
+days <- days <- seq(0, 100, by = 1)
+
+# calculate weighted spray effect using the gaussian sigma=20 decay function
+g20.days <- as.data.frame(days) %>%
+  mutate(g20_day.max = exp(-(days^2) / (2 * 20^2)))
+
+# plot of weight distribution over days
+plot.g20 <- ggplot(g20.days, aes(x = days, y = g20_day.max)) +
+  geom_line() +
+  theme_bw()
+plot.g20
+```
+
+
+```{r fixed effect prediction stack}
+# the stack for predictions without any random effects
+# the response variable is set to NA so INLA can populate with the predicted value based on the model in the estimation stack
+stack.pred.fixef <- inla.stack(
+  data = list(y = NA),
+  A = list(1, 1),
+  effects = list(
+    Intercept = rep(1, nrow(g20.days)),
+    g20.weight = g20.days[["g20_day.max"]]
+  ),
+  tag = "pred.fixef"
+)
+```
+
+
+```{r stack spatial est}
+# the stack for estimation
+stack.est <- inla.stack(
+  data = list(y = data$AA_TOTAL),
+  A = list(1, 1),
+  effects = list(
+    Intercept = rep(1, nrow(data)),
+    g20.weight = data[["g20_day.max"]]
+  ),
+  tag = "est"
+)
+```
+
+
+```{r all stack }
+# combine the estimation and prediction stacks
+stack.all <- inla.stack(
+  stack.est,
+  stack.pred.fixef
+)
+```
+
+```{r formula}
+# the model for prediction averages out the random effects (spatial, temporal, and household variations), that are set equal to their mean of zero.
+# it uses only the fixed effect selected from the within-household model candidates to estimate Ae. aegypti density per household
+formula <- y ~ -1 + Intercept + g20.weight
+```
+
+
+```{r m.g20.14}
+# run INLA models for all stacks
+m.g20.14 <- inla(formula,
+  data = inla.stack.data(stack.all),
+  family = "nbinomial",
+  control.family = list(link = "log"),
+  control.compute = list(cpo = TRUE, dic = TRUE, waic = TRUE),
+  control.predictor = list(
+    link = 1,
+    A = inla.stack.A(stack.all),
+    compute = T
+  )
+)
+
+saveRDS(m.g20.14, here("analysis", "data", "derived_data", "results", "m.g20.14.rds"))
+```
+
+summary.fitted.values: data frame with the mean, standard deviation, and quantiles of the fitted values obtained by transforming the linear predictors by the inverse of the link function
+
+```{r estimated number of ae aegypti}
+# extract the indexes of stack full that correspond to the tag = "pred.fixef"
+# that is, the prediction values
+id.pred.fixef <- inla.stack.index(stack.all, "pred.fixef")$data
+
+days <- days <- seq(0, 100, by = 1)
+
+# summary.fitted.values: data frame with the mean, standard deviation, and quantiles of the fitted values obtained by transforming the linear predictors by the inverse of the link function
+mg20.14.pred <- as.data.frame(days) %>%
+  # weight value per day given a Gaussian function with sigma= 20
+  mutate(
+    g20_weight = exp(-(days^2) / (2 * 20^2)),
+    # model prediction of the mean number of Ae. aegypti
+    AA.pred = m.g20.14$summary.fitted.values[id.pred.fixef, "mean"],
+    sd = m.g20.14$summary.fitted.values[id.pred.fixef, "sd"],
+    # model prediction of the lower confidence interval of Ae. aegypti
+    lower.ci = AA.pred - 2 * sd,
+    # model prediction of the upper confidence interval of Ae. aegypti
+    upper.ci = AA.pred + 2 * sd
+  )
+
+
+
+## a plot with the original data
+ggplot(mg20.14.pred, aes(x = days, y = AA.pred)) +
+  geom_ribbon(
+    data = g20.days, aes(
+      ymin = lower.ci,
+      ymax = upper.ci
+    ),
+    alpha = 0.2
+  ) +
+  geom_line(data = mg20.14.pred)
+# geom_point()
+```
+
+
+```{r ae aegypti reduction}
+# model parameter estimates
+mg20.14.red.f.e <- round(exp(m.g20.14[["summary.fixed"]]), digits = 2)
+
+# the intercept is the baseline average number of Ae. aegypti overall
+baseline <- mg20.14.red.f.e$mean[[1]]
+# in this case it's 0.55. in the original study it is 0.65
+
+
+# To calculate percent reduction, you need to know the baseline value (before reduction) and the final value (after reduction). The formula to calculate percent reduction is:
+
+# % Reduction = ((Baseline Value − Final Value)/Baseline Value) × 100%
+
+
+mg20.14.red <- mg20.14.pred %>%
+  filter(days <= 60) %>%
+  # if 0.55 is 100% of expected Ae. aegypti when the spray effect = 0
+  # what % of 0.55 is the predicted number of AA for each time point
+  # and express in terms of reduction from 100%
+  # ((baseline-AA.pred)/baseline)*100)
+  mutate(
+    reduction = ((baseline - AA.pred) / baseline) * 100,
+    # because the lower.ci of AA.pred will be a higher value of reduction
+    # it's actually the upper band
+    u.red = ((baseline - lower.ci) / baseline) * 100,
+    # viceversa for the upper.ci
+    l.red = ((baseline - upper.ci) / baseline) * 100
+  )
+
+# what is the maximum reduction achieved by the spray effect?
+# round(max(range(mg20.14.red$reduction)), 2)
+# in the study it was 48.93564
+
+# when is the spray effect reduced by 50%?
+# max(range(mg20.14.red$reduction))*0.5
+# 24.46782
+
+# linear interpolation function
+linear_interpolation <- function(x, x_values, y_values) {
+  # find the index of the closest value to x
+  index <- which.min(abs(x - x_values))
+
+  # check if the value exists exactly
+  if (x == x_values[index]) {
+    return(y_values[index])
+  } else {
+    # perform linear interpolation
+    y <- y_values[index] +
+      ((y_values[index + 1] - y_values[index]) / (x_values[index + 1] - x_values[index])) *
+        (x - x_values[index])
+    return(y)
+  }
+}
+
+# perform linear interpolation for x = 25 (50% of the maximum reduction)
+interpolated_y <- linear_interpolation(25, mg20.14.red$reduction, mg20.14.red$days)
+
+# 25.87502
+
+# 25% reduction corresponds approximately to 25 days post spray
+
+saveRDS(mg20.14.red, here("analysis", "data", "derived_data", "results", "mg20.14.red.rds"))
+```
+
+
+
+# Prior sensitivity analysis
+
+```{r read in prior data}
+# read in WAIC and fixed effect estimate output from models using different priors
+
+waic.priors.13.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "waic.priors.13.rds")) %>%
+  mutate(experiment = "2013")
+
+fe.priors.13.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "fe.priors.13.rds")) %>%
+  mutate(experiment = "2013")
+
+waic.priors.14.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "waic.priors.14.rds")) %>%
+  mutate(experiment = "2014")
+
+fe.priors.14.raw <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "fe.priors.14.rds")) %>%
+  mutate(experiment = "2014")
+```
+
+```{r prior data all fixed effect estimates }
+# combine estimated effects from models from prior sensitivity analysis
+fe.priors <- bind_rows(fe.priors.13.raw, fe.priors.14.raw)
+
+saveRDS(fe.priors, here("analysis", "data", "derived_data", "results", "fe.priors.rds"))
+```
+
+
+```{r prior data all waic }
+waic.priors.13 <- waic.priors.13.raw %>%
+  # rank the models by waic value
+  mutate(rank_waic = seq(1:nrow(waic.priors.13.raw))) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # categorize models by including only variables that assign weight to the spray effect according to a function over time
+  # or also over space
+  mutate(compare_vbles = case_when(
+    str_detect(fixed, "i_total") == TRUE ~ "distance",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("time", "distance"))) %>%
+  arrange(rank_waic) %>%
+  # waic.difference.from.g20.model= categorizes the models as the best fitting model in the prior sensitivity analysis,
+  # as a model with difference in WAIC not significantly different from the best fitting model,
+  # or as a model with difference in WAIC significantly different from the best fitting model
+  mutate(waic.difference.from.best.model = case_when(
+    ci.d.l > 0 ~ "Significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Best fitting model",
+    TRUE ~ "No significant difference"
+  ))
+
+waic.priors.14 <- waic.priors.14.raw %>%
+  # rank the models by waic value
+  mutate(rank_waic = seq(1:nrow(waic.priors.14.raw))) %>%
+  mutate(waic = round(waic, digits = 2)) %>%
+  # categorize models by including only variables that assign weight to the spray effect according to a function over time
+  # or also over space
+  mutate(compare_vbles = case_when(
+    str_detect(fixed, "i_total") == TRUE ~ "distance",
+    TRUE ~ "time"
+  )) %>%
+  mutate(compare_vbles = factor(compare_vbles, levels = c("time", "distance"))) %>%
+  arrange(rank_waic) %>%
+  # waic.difference.from.g20.model= categorizes the models as the best fitting model in the prior sensitivity analysis,
+  # as a model with difference in WAIC not significantly different from the best fitting model,
+  # or as a model with difference in WAIC significantly different from the best fitting model
+  mutate(waic.difference.from.best.model = case_when(
+    ci.d.l > 0 ~ "Significant difference",
+    ci.d.l == 0 & ci.d.u == 0 ~ "Best fitting model",
+    TRUE ~ "No significant difference"
+  ))
+
+waic.priors <- bind_rows(waic.priors.13, waic.priors.14)
+
+saveRDS(waic.priors, here("analysis", "data", "derived_data", "results", "waic.priors.rds"))
+```

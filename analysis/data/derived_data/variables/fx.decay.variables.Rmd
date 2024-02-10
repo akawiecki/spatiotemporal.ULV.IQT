@@ -1,0 +1,254 @@
+---
+title: "fx.decay.variables"
+author: "Ania Kawiecki"
+date: "2023-02-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(parallel)
+library(tmap)
+library(knitr) 
+library(tmap)
+library(RColorBrewer)
+
+```
+
+```{r make function to copy paste formulas for the gaussian decay function }
+
+# gaussian  #exp(-(days^2)/(2*0.3^2)
+
+sigma <- c(seq(1,7, by=2), seq(10,40,by=5), seq(50,60,by=10), 80)
+
+
+days <- c("diff_c1", "diff_c2", "diff_c3", "diff_c4", "diff_c5", "diff_c6")
+
+days.n <- seq(1:6)
+
+#function for only the formula
+fx.formula.g <- function(x){
+  
+f <- paste ("exp(-(", days, "^2)/(2*", x,"^2))", sep="")
+f
+
+f.all= paste ("g", x, "_day", days.n, "=if_else(", f, " == 1, 0,", f, "),", sep="")
+}
+
+f.formula.g <- lapply(X = sigma, FUN = fx.formula.g) 
+
+f.formula.g
+
+#formula does exactly what i want it to do
+
+fx.vector.g <- function(x){
+  
+vector <- as.vector( paste ("g", x, "_day", days.n, sep=""))
+}
+f.vector.g <- lapply(X = sigma, FUN = fx.vector.g)
+
+f.vector.g
+
+fx.rowsum.g <- function(x){
+  
+  paste("g", sigma[x], "_day", "= rowSums(h.e.c.13[,", f.vector.g[x], "], na.rm = TRUE),", sep="")
+}
+
+f.rowsum.g <- lapply(X = 1:length(sigma), FUN = fx.rowsum.g)
+f.rowsum.g
+
+
+```
+
+
+```{r make function to copy paste formulas for the exponential decay function }
+
+### expo not squared 
+# "exp(-(k)*(days))"
+
+#e0.3_day1 = if_else(exp(-(0.3)*(diff_c1)) == 1, 0,exp(-(0.3)*(diff_c1))), 
+#e0.9_day1 = if_else(exp(-(0.9)*diff_c1 == 1, 0,exp(-(0.9)*diff_c1)))
+
+k <- c(0.005, 0.010, 0.015, 0.020, 0.030, 0.040, 0.060, 0.100, 0.200, 0.400, 1.000)
+
+days <- c("diff_c1", "diff_c2", "diff_c3", "diff_c4", "diff_c5", "diff_c6")
+
+days.n <- seq(1:6)
+
+#function for only the formula
+fx.formula.e <- function(x){
+  
+f <- paste ("exp(-(", x,")*", days, sep="")
+f
+#e0.3_day1 = if_else(exp(-(0.3)*(diff_c1)) == 1, 0, exp(-(0.3)*(diff_c1)))
+#e0.7_day6 = if_else(exp(-(0.7)*diff_c6) == 1, 0, exp(-(0.7)*diff_c6))
+
+f.all= paste ("e", x, "_day", days.n, "=if_else(", f, ") == 1, 0,", f, ")),", sep="")
+
+}
+
+f.e <- lapply(X = k, FUN = fx.formula.e) 
+
+f.e
+#formula does exactly what i want it to do
+
+fx.vector.e <- function(x){
+  
+vector <- as.vector( paste ("e", x, "_day", days.n, sep=""))
+}
+f.vector.e <- lapply(X = k, FUN = fx.vector.e)
+
+f.vector.e
+
+fx.rowsum.e <- function(x){
+  
+  paste("e", k[x], "_day", "= rowSums(h.e.c.13[,", f.vector.e[x], "], na.rm = TRUE),", sep="")
+}
+
+f.rowsum.e <- lapply(X = 1:length(k), FUN = fx.rowsum.e)
+
+f.rowsum.e
+
+```
+
+```{r make function to copy paste formulas for the exponential squared decay function }
+
+### expo squared 
+
+### expo  squared 
+# "exp(-(k^2)*(days^2))"
+
+k <- c(seq(0.1,0.3, by=0.1),0.5, 1)
+
+days <- c("diff_c1", "diff_c2", "diff_c3", "diff_c4", "diff_c5", "diff_c6")
+
+days.n <- seq(1:6)
+
+#function for only the formula
+fx.formula.e.2 <- function(x){
+  
+f <- paste ("exp(-(", x,"^2)*", days, "^2)",sep="")
+f
+
+f.all= paste ("e", x, "_day", days.n, "=if_else(", f, " == 1, 0,", f, ")", sep="")
+}
+
+f.e.2 <- lapply(X = k, FUN = fx.formula.e) 
+
+
+
+#formula does exactly what i want it to do
+
+fx.vector.e.2 <- function(x){
+  
+vector <- as.vector( paste ("e", x, "_2_day", days.n, sep=""))
+}
+f.vector.e.2 <- lapply(X = k, FUN = fx.vector.e.2)
+
+
+
+fx.rowsum.e.2 <- function(x){
+  
+  paste("e", k[x], "_2_day", "= rowSums(h.e.c.13[,", f.vector.e.2[x], "], na.rm = TRUE),", sep="")
+}
+
+f.rowsum.e.2 <- lapply(X = 1:length(k), FUN = fx.rowsum.e.2)
+
+#"e0.5_2_day"
+list.e.2 <- paste("e",k,"_2_day",sep="")
+
+
+```
+
+```{r list  mutate_at}
+
+#"e0.5_day.max"
+
+list.e <- paste("e",k,"_day.max",sep="")
+
+#"e0.5_2_day"
+list.e.2 <- paste("e",k,"_2_day.max",sep="")
+
+#g1_day"
+list.g <- paste("g",sigma,"_day.max",sep="")
+
+```
+
+
+# DISTANCE FORMULAS 
+
+
+```{r make function to copy paste formulas for the gaussian decay function for surround variables}
+
+# gaussian  #exp(-(days^2)/(2*0.3^2)
+
+sigma <-  c(5, seq(25,150, by=25), 200,250, 300)
+
+
+#function for only the formula
+fx.formula.g.dist <- function(x){
+
+#y= exp(-(dist^2)/(2*sigma^2)),   
+f <- paste ("exp(-(dist^2)/(2*", x,"^2))", sep="")
+f
+
+#g5_sum=sum(exp(-(dist^2)/(2*5^2))*g20_day.min, na.rm = TRUE)  
+f.all= paste ("g", x, "_sum=sum(", f, "*g20_day.min, na.rm = TRUE),", sep="")
+}
+
+f.formula.g <- lapply(X = sigma, FUN = fx.formula.g.dist) 
+
+f.formula.g
+
+
+
+```
+
+
+```{r make function to copy paste formulas for the exponential decay function dist}
+
+### expo not squared 
+# "exp(-(k)*(days))"
+
+#y= exp(-(k)*(dist)), 
+
+k <- c( 0.0025, 0.0035, seq(0.005,0.0125, by=0.0025), seq(0.02,0.05, by=0.025), 0.2)
+
+
+#function for only the formula
+fx.formula.e.dist <- function(x){
+  
+f <- paste ("exp(-(", x,")", sep="")
+f
+
+#e0.5_sum= sum(exp(-(0.5)*(dist))*g20_day.min, na.rm = TRUE)
+
+f.all= paste ("e", x, "_sum=sum(", f,"*(dist))*g20_day.min, na.rm = TRUE),", sep="")
+
+}
+
+f.e <- lapply(X = k, FUN = fx.formula.e.dist) 
+
+f.e
+
+
+```
+
+
+```{r ist variables dist}
+
+#group_by(ring,i_total,e0.5_total,e0.5_2_total,e1_2_total,e1.5_2_total, g0.1_total,g0.3_total,g0.5_total, g0.7_total,g0.9_total) %>% 
+
+list.e.dist<- paste("e",k,"_sum",sep="")
+
+list.g.dist<- paste("g",sigma,"_sum",sep="")
+
+```
+

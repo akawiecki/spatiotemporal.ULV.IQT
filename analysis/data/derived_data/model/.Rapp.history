@@ -1,0 +1,2 @@
+load("/Users/annakawiecki/Documents/epi/project/ulv/ulv_iquitos/model/fx.waic.cpo.rds")
+load("/Users/annakawiecki/Documents/epi/project/ulv/ulv_iquitos/model/fx.waic.b.g20.rds")

@@ -1,0 +1,351 @@
+---
+title: "ulv_figures"
+author: "Ania Kawiecki"
+date: "2023-03-22"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, warning=FALSE, message=FALSE}
+library(pacman)
+pacman::p_load(
+  tidyverse, sf, lubridate, here,
+  patchwork, # allows plots to be collated
+  RColorBrewer, # allows selection of plot palettes
+  scales, # also allows selection of plot palettes
+  ggspatial, # allows map annotation with north arrow
+  ggtext, # ggtext allows the text inside ** to be displayed in italics
+  latex2exp # allows equations in ggplot text
+)
+```
+
+
+
+# METHODS 
+
+## Fig. 1 
+
+
+## Visual representation of the ring distance schemes 
+
+
+```{r read in Fig 1 data}
+# import data with all houses within a 1000m buffer of each study household
+gis.buff.14 <- readRDS(here("analysis", "data", "raw_data", "gis.buff.sample.14.rds"))
+# import data of houses sprayed the week before
+i.bio <- readRDS(here("analysis", "data", "derived_data", "results", "i.bio.rds"))
+i.100m <- readRDS(here("analysis", "data", "derived_data", "results", "i.100m.rds"))
+# import ring data
+i.buffer.bio <- readRDS(here("analysis", "data", "derived_data", "results", "i.buffer.bio.rds"))
+i.buffer.100m <- readRDS(here("analysis", "data", "derived_data", "results", "i.buffer.100m.rds"))
+
+# extract the study data frame from the data frame that includes all houses within a 1000m buffer of each study household
+study.data <- gis.buff.14 %>%
+  filter(!is.na(exp)) %>%
+  select(c(
+    "location_code", "date", "cycle_1", "cycle_2", "cycle_3", "cycle_4",
+    "cycle_5", "cycle_6", "exp", "zone", "geometry"
+  ))
+
+# choose one of the households to represent household i
+i <- study.data[which(study.data$location_code == "HTB803" & study.data$date == "2014-04-14"), ]
+```
+
+```{r plot bio rings }
+buffer.bio <- ggplot() +
+  geom_sf(
+    data = i.bio,
+    aes(colour = spray.past.w),
+    size = 0.5,
+    alpha = 1
+  ) +
+  geom_sf(
+    data = i,
+    colour = "red",
+    size = 0.5,
+    alpha = 1
+  ) +
+  geom_sf(
+    data = i.buffer.bio,
+    aes(fill = ring),
+    alpha = 0.5
+  ) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(
+    location = "bl", which_north = "true",
+    pad_x = unit(0.0, "in"), pad_y = unit(0.2, "in"),
+    style = north_arrow_fancy_orienteering
+  ) +
+  scale_fill_brewer(
+    palette = "YlOrRd",
+    direction = 1,
+    name = "Distance ring (m)"
+  ) +
+  scale_color_brewer(
+    palette = "Dark2",
+    direction = 1,
+    name = "House sprayed \nin previous week"
+  ) +
+  coord_sf(xlim = c(692457.9, 694457.9), ylim = c(9585375, 9587375)) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  )
+
+buffer.bio
+```
+
+
+
+```{r plot 100m rings }
+buffer.100m <- ggplot() +
+  geom_sf(
+    data = i.100m,
+    aes(colour = spray.past.w),
+    size = 0.5,
+    alpha = 1
+  ) +
+  geom_sf(
+    data = i,
+    colour = "red",
+    size = 0.5,
+    alpha = 1
+  ) +
+  geom_sf(
+    data = i.buffer.100m,
+    aes(fill = ring),
+    alpha = 0.5
+  ) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(
+    location = "bl", which_north = "true",
+    pad_x = unit(0.0, "in"), pad_y = unit(0.2, "in"),
+    style = north_arrow_fancy_orienteering
+  ) +
+  scale_fill_brewer(
+    palette = "YlOrRd",
+    direction = 1,
+    name = "Distance ring (m)"
+  ) +
+  scale_color_brewer(
+    palette = "Dark2",
+    direction = 1,
+    name = "House sprayed \nin previous week"
+  ) +
+  coord_sf(xlim = c(692457.9, 694457.9), ylim = c(9585375, 9587375)) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  )
+
+buffer.100m
+```
+
+```{r Fig 1 distance rings}
+# combine both plots using patchwork::
+buffer.rings <- buffer.bio / buffer.100m +
+  plot_annotation(
+    title = "Figure 1",
+    tag_levels = "A"
+  )
+
+ggsave(
+  filename = "fig1.jpg", buffer.rings,
+  width = 150, height = 160, dpi = 500, units = "mm"
+)
+```
+
+# RESULTS
+
+
+##  Fig.2 Effects of sprays within households
+
+```{r read in Fig 2 data }
+curves.model.time <- readRDS(here("analysis", "data", "derived_data", "results", "curves.model.time.rds"))
+
+# read in model outputs modified for both time and space weighted models
+waic.time <- readRDS(here("analysis", "data", "derived_data", "results", "waic.time.rds"))
+```
+
+
+### Fig 2 A
+Relative model fits of within-household temporal weighting functions for spray effects. Thicker red lines indicate best-fitting models, with the thickest line indicating the best-fitting model and the other thick lines representing models where the WAIC was not significantly different from the WAIC of the best fitting model
+
+```{r Fig 2 A}
+# plot decay curves for the within-household models, color coded by dWAIC
+
+p.curves.dwaic <- ggplot(curves.model.time, aes(x = days, y = y, group = curve)) +
+  geom_line(aes(
+    color = rank_waic, # color of the decay curves by rank WAIC of the model including the variable that used that decay function
+    size = waic.difference.from.best.model # size of the line indicates if the dWAIC was significantly different from the lowest WAIC value
+  )) +
+  # lower (better) WAIC rank values are red, higher (worse) ranks are blue
+  scale_colour_gradient2(
+    low = "red",
+    mid = "grey",
+    high = "blue",
+    midpoint = 35
+  ) +
+  # size of the curve lines indicate if the dWAIC was significantly different from the lowest WAIC value
+  scale_size_manual(values = c(`Best model` = 2, `No significant difference` = 1.5, `Significant difference` = 0.5)) +
+  # results from each experiment are divided by columns
+  # results from models using the cumulative weight of all previous sprays vs the weight of the most recent spray are divided by rows
+  facet_grid(spray.effect.weight.type ~ experiment,
+    # allow for thicker facet label to fit the text
+    labeller = labeller(spray.effect.weight.type = label_wrap_gen(width = 20))
+  ) +
+  ylim(0, 1) +
+  labs( # define labels for legens and axis
+    y = "Relative weight of the spray effect", x = "Days since spray event",
+    colour = "WAIC rank",
+    # \n adds a line break
+    size = "WAIC difference \nfrom best model"
+  ) +
+  theme_bw(
+    # per journal requirements establish font and font size
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  # customize the size legend to have 3 rows
+  guides(size = guide_legend(nrow = 3))
+```
+
+### Fig 2 B
+Decay functions applied to the days since most recent spray that were within the top five best-fitting models by average WAIC rank across the two experiments.
+```{r Fig 2 B}
+waic.both.5 <- waic.time %>%
+  filter(avg_rank_waic %in% avg_rank_waic_top5) %>%
+  # consensus.model= identifies m_best as the best-fitting model from the within-household spray effects model comparison
+  mutate(consensus.model = case_when(
+    spray.effect == "Gaussian 20 Most recent spray" ~ "Consensus model",
+    TRUE ~ "Top 5"
+  )) %>%
+  select(c("spray.effect", "spray.effect.type", "avg.rank.waic", "consensus.model")) %>%
+  distinct()
+
+
+curves.both.5 <- waic.both.5 %>%
+  # join to the data set that provides data for plotting the decay curve lines
+  left_join(
+    curves.model.time[, c("spray.effect", "experiment", "days", "y", "decay", "curve")] %>%
+      select(-c("experiment")) %>%
+      distinct(),
+    by = c("spray.effect")
+  ) %>%
+  mutate(
+    curve = fct_relevel(curve, c("k=0.04", "k=0.06", "sigma=15", "sigma=20", "sigma=25")),
+    decay = fct_relevel(decay, c("Gaussian", "Exponential"))
+  )
+
+# assign different color palettes to the k values and the sigma values
+color.k.both <- hue_pal(h = c(100, 250))(2)
+color.g.both <- hue_pal(h = c(0, 50))(3)
+
+# this vector is a list of colors for each varying parameter in the top 5 models
+time.decay.both <- c(color.k.both, c("#FF6C91", "red", "#D98F00"))
+
+p.curves.both.5 <- ggplot(curves.both.5, aes(x = days, y = y, group = curve)) +
+  geom_line(aes(
+    color = curve, # color defines the varying parameter (k or sigma) of the decay function used for that model's spray effect weight
+    linetype = decay, # different line pattern to distinguish exponential from Gaussian decay functions
+    size = consensus.model # size of the line indicates if the line corresponds to the selected consensus model or not
+  )) +
+  # add manual labels for the varying parameters
+  scale_color_manual(
+    labels = parse(text = c("k==0.04", "k==0.06", "sigma==15", "sigma==20", "sigma==25", "sigma==30")),
+    # assign the selected colors to these values
+    values = time.decay.both
+  ) +
+  # assign sizes
+  scale_size_manual(values = c(`Consensus model` = 2, `Top 5` = 1)) +
+  ylim(0, 1) +
+  labs( # add informative labels to the legends and axes
+    y = "Relative weight of the spray effect", x = "Days since spray event",
+    colour = "Varying parameter",
+    linetype = "Decay function",
+    size = "Average WAIC rank"
+  ) +
+  theme_bw(
+    base_size = 12, # per journal requirements establish font and font size
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(legend.text.align = 0)
+
+p.curves.both.5
+```
+Using the sample data this code actually produces no curves, because the best average rank models do not have decay values. 
+
+```{r Fig 2 together}
+# collate fig 2 A and B
+fig2 <- (p.curves.dwaic / p.curves.both.5) +
+  plot_annotation(
+    title = "Figure 2",
+    # add labels A and B to the top left corner
+    tag_levels = "A"
+  )
+
+ggsave(
+  filename = "fig2.jpg", fig2,
+  width = 170, height = 225, dpi = 500, units = "mm"
+)
+```
+
+
+## Fig. 3  % reduction for *Ae. Aegypti* abundance following sprays
+
+```{r read fig 3 data}
+# import calculated reduction in Ae. aegypti over time
+mg20.14.red <- readRDS(here("analysis", "data", "derived_data", "results", "mg20.14.red.rds"))
+```
+
+
+```{r fig 3 reduction}
+plot.mg20.14.red <- ggplot(mg20.14.red, aes(x = days, y = reduction)) +
+  # add 95% CI area around the mean line
+  geom_ribbon(
+    data = mg20.14.red, aes(
+      ymin = u.red,
+      ymax = l.red
+    ),
+    alpha = 0.2
+  ) +
+  # add mean line
+  geom_line(data = mg20.14.red) +
+  # add meaningful labels
+  labs(
+    title = "Figure 3",
+    y = TeX(r"(Reduction of *Ae.aegypti* vs. no-spray baseline (%))"), # use of TeX(r" ") allows italics and equations in the label text
+    x = "Days since most recent spray event"
+  ) +
+  xlim(0, 60) +
+  scale_y_reverse(limits = c(100, -15)) +
+  annotate("text",
+    x = 40, y = 75,
+    label = TeX(
+      r"($y=0.65+0.51\times e^{-\frac{days^2}{2\times{20}^2}}$)" # add text with the model equation
+    )
+  ) +
+  theme_bw(
+    base_size = 12, # per journal requirements establish font and font size
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(
+    legend.text.align = 0,
+    axis.title.y = ggtext::element_markdown()
+  )
+
+plot.mg20.14.red
+
+ggsave(
+  filename = "fig3.jpg", plot.mg20.14.red,
+  width = 85, height = 100, dpi = 500, units = "mm"
+)
+```

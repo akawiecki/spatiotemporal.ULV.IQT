@@ -1,0 +1,177 @@
+---
+title: "model.output"
+author: "Ania Kawiecki"
+date: "2024-02-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries}
+library(pacman)
+pacman::p_load(INLA, tidyverse, sf, lubridate, parallel, here)
+```
+
+
+# compare random effects models
+
+```{r import data random models}
+fx.waic <- readRDS(here("analysis", "data", "derived_data", "model", "fx.waic.rds"))
+m.random.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.random.13.rds"))
+m.random.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.random.14.rds"))
+```
+
+
+```{r  waic for random effects 2013}
+waic.random.13 <- fx.waic(m.random.13)
+
+print(waic.random.13)
+```
+
+```{r  waic for random effects 2014}
+waic.random.14 <- fx.waic(m.random.14)
+
+print(waic.random.14)
+```
+
+Using the sample data provided in this repository, the model with all three random effects is not the combination with the lowest WAIC, but this was the case with the study data. Thus moving forward all models include all three random effects. 
+
+
+# compare models measuring within-household spray effects 
+
+
+```{r import data time models}
+fx.fix.eff <- readRDS(here("analysis", "data", "derived_data", "model", "fx.fix.eff.rds"))
+fx.waic <- readRDS(here("analysis", "data", "derived_data", "model", "fx.waic.rds"))
+
+m.random.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.random.13.rds"))
+m.random.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.random.14.rds"))
+m.time.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.time.13.rds"))
+m.time.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.time.14.rds"))
+```
+
+```{r list of random and time models }
+m.time.random.list.13 <- flatten(list(m.random.13, m.time.13))
+
+m.time.random.list.14 <- flatten(list(m.random.14, m.time.14))
+```
+
+
+# parameter estimate comparison
+
+```{r m.time fixed effect estimate extraction }
+# fixed effect estimates from within-household models for 2013
+
+f.e.time.13 <- fx.fix.eff(m.time.random.list.13) %>% 
+  mutate(fixed.s = if_else(is.na(fixed.s) == TRUE, random, fixed.s))
+
+# fixed effect estimates from within-household models for 2014
+f.e.time.14 <- fx.fix.eff(m.time.random.list.14) %>% 
+  mutate(fixed.s = if_else(is.na(fixed.s) == TRUE, random, fixed.s))
+
+```
+
+```{r save rds f.e.time}
+saveRDS(f.e.time.13, here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "f.e.time.13.rds"))
+
+saveRDS(f.e.time.14, here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "f.e.time.14.rds"))
+```
+
+
+
+## waic comparison 
+```{r waic comparison }
+# WAIC from within-household models for 2013
+waic.time.13 <- fx.waic(m.time.random.list.13) 
+waic.time.13 <-waic.time.13 %>% 
+  # for models with only random effects and no fixed effects,
+  # add a value to fixed.s (column with fixed effect names) that identifies the random effect model
+  mutate(fixed.s = if_else(is.na(fixed.s) == TRUE, random, fixed.s)) %>%
+  # arrange by WAIC value
+  arrange(waic) %>%
+  # assign a rank in order of lowest to highest WAIC
+  mutate(rank_waic = seq(1:nrow(waic.time.13)))
+
+# WAIC from within-household models for 2014
+waic.time.14 <- fx.waic(m.time.random.list.14)
+waic.time.14 <-waic.time.14 %>% 
+  mutate(fixed.s = if_else(is.na(fixed.s) == TRUE, random, fixed.s)) %>%
+  arrange(waic) %>%
+  mutate(rank_waic = seq(1:nrow(waic.time.14)))
+
+# bind the data sets from 2013 and 2014 together to find the lowest common WAIC
+waic.time <- bind_rows(waic.time.13, waic.time.14)
+
+# average the model WAIC rank between the two experiments and chose the model with the best average WAIC rank
+waic.time.avg <- waic.time %>%
+  group_by(fixed.s) %>%
+  summarize(avg.rank.waic = mean(rank_waic)) %>%
+  arrange(avg.rank.waic)
+```
+
+```{r save rds}
+saveRDS(waic.time.13, here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "waic.time.13.rds"))
+
+saveRDS(waic.time.14, here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "waic.time.14.rds"))
+```
+
+
+Using the sample data provided in this repository, the model with lowest average WAIC rank is not the model that applied weights to the time since the most recent spray event according to a Gaussian function with 𝜎 = 20, but this was the case with the study data. Thus moving forward the model including as variable *a* the weight of the time since the most recent spray event according to a Gaussian function with 𝜎 = 20 will be denoted as $m_{best}$
+
+
+
+
+# compare models measuring spray effects in neighboring households
+
+
+```{r import space and time models}
+# import function that allows extraction and calculation of difference in WAIC for each model and the WAIC value for the model selected in the within-household analysis
+fx.waic.b.g20 <- readRDS(here("analysis", "data", "derived_data", "model", "fx.waic.b.g20.rds"))
+
+# import all model lists needed for the comparison.
+
+m.time.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.time.13.rds"))
+m.time.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.time.14.rds"))
+m.space.rings.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.space.rings.13.rds"))
+m.space.rings.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.space.rings.14.rds"))
+m.space.decay.13 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.space.decay.13.rds"))
+m.space.decay.14 <- readRDS(here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.space.decay.14.rds"))
+```
+
+```{r list of random and time models }
+# bring together the models that used variables based on decay functions and on proportion within a ring
+# for the spray effect of the surrounding households
+# save the output
+m.space.13 <- flatten(list(m.space.rings.13, m.space.decay.13))
+
+m.space.14 <- flatten(list(m.space.rings.14, m.space.decay.14))
+
+saveRDS(m.space.13, here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "m.space.13.rds"))
+
+saveRDS(m.space.14, here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "m.space.14.rds"))
+
+# create a list that combines models with only an a variable and models with a+b variables
+# that is models measuring the within-household spray effect
+# and models measuring both the within-household spray effect and the effect of sprays in the surrounding households
+m.space.time.list.13 <- flatten(list(m.space.13, m.time.13))
+
+m.space.time.list.14 <- flatten(list(m.space.14, m.time.14))
+```
+
+```{r waic spray effects in neighboring households comparison }
+# comparing models measuring spray effects in neighboring households to the model selected in the within-household analysis for 2013 using WAIC
+waic.space.13 <- fx.waic.b.g20(m.space.time.list.13)
+# comparing models measuring spray effects in neighboring households to the model selected in the within-household analysis for 2014 using WAIC
+waic.space.14 <- fx.waic.b.g20(m.space.time.list.14)
+```
+
+```{r save rds}
+saveRDS(waic.space.13, here("analysis", "data", "derived_data", "model", "model_2013", "model_outputs_2013", "waic.space.13.rds"))
+
+saveRDS(waic.space.14, here("analysis", "data", "derived_data", "model", "model_2014", "model_outputs_2014", "waic.space.14.rds"))
+```

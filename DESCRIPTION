@@ -1,0 +1,15 @@
+Package: spatiotemporal.ULV.IQT
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.0.9000
+Authors@R:
+    person("Anna", "Kawiecki", , "akawiecki@ucdavis.edu", role = c("aut", "cre"))
+Description: The analyses for the manuscript "Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density".
+License: MIT + file LICENSE
+ByteCompile: true
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Imports: here
+Suggests: devtools,
+    git2r

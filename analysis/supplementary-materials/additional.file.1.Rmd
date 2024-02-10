@@ -1,0 +1,884 @@
+---
+output:
+  pdf_document:
+    keep_tex: yes
+    number_sections: yes
+    latex_engine: xelatex
+    fig_caption: true
+  word_document: default
+fontsize: 12pt
+header-includes:
+  \usepackage{booktabs}
+  \usepackage{float}
+    \floatplacement{figure}{H}
+    \usepackage{caption}
+    \usepackage[font={normalsize}]{caption}
+---
+\setmainfont{Arial}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  dev = "cairo_pdf",
+  dpi = 300,
+  fig.pos = "H"
+)
+```
+
+```{r libraries, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(kableExtra)
+library(magrittr)
+library(gt)
+library(latex2exp)
+library(patchwork)
+library(scales)
+
+library(pacman)
+pacman::p_load(
+  here, # allows files to be located within folders given the R project's path
+  knitr,
+  tidyverse,
+  kableExtra,
+  magrittr,
+  gt,
+  patchwork, # allows plots to be collated
+  RColorBrewer, # allows selection of plot palettes
+  scales, # also allows selection of plot palettes
+  ggspatial, # allows map annotation with north arrow
+  ggtext, # ggtext allows the text inside ** to be displayed in italics
+  latex2exp # allows equations in ggplot text
+)
+```
+
+```{r read in data, include=FALSE}
+decay.time <- readRDS(here("analysis", "data", "derived_data", "results", "decay.time.rds"))
+
+decay.distance <- readRDS(here("analysis", "data", "derived_data", "results", "decay.distance.rds"))
+
+curves.model.time <- readRDS(here("analysis", "data", "derived_data", "results", "curves.model.time.rds"))
+```
+
+
+# Prior sensitivity analysis
+
+All candidate models in this study were run using default uninformative prior distributions recommended in the R-INLA documentation, with the exception of the prior for the SPDE Matérn function, where a value of 10 was assigned to the range and of 1 to the standard deviation of the spatial field using the PC prior function; this combination of priors is hereafter named "original". The default priors, as described in the main text, are a zero- mean Gaussian prior distributions $\beta \sim Normal(0,0.001^{-1})$ for all fixed effects (*a* and *b*) and log gamma prior distributions for the iid and RW1 random effects ($\eta_{i} \sim log gamma(1, 0.00005)$ and $\delta_{t} \sim log gamma(1, 0.00005)$). To ensure that other prior choices would not affect the results, we performed a prior sensitivity analysis on both $m_{best}$, the best fitting model including an effect for spray within the household ($a_{f_{gaussian,\sigma=20}(\Delta t_{c})}$), and the best fitting model including *a* and an effect for spray in neighboring households ($a_{f_{gaussian,\sigma=20}(\Delta t_{c})}$ + $b_{f_{inverse}(d_{ij})}$). We then assessed the difference in WAIC and rate ratios of the fixed effects when using alternative priors for the fixed and random effects as described in Table 1 (Additional file 1: Table S1). Alternative priors were assigned based on reasonable values for each parameter, as well as values that seemed extreme to asses if these changed the model results. Values for the penalized complexity (PC) priors for the precision ($\tau$) of the random walk of order 1 (RW1) and the independent, identically distributed (iid) hyperparameters were selected by simulating the prior distributions using the inlatools R package to allow for a visual assessment. These PC priors are defined by the parameters $\sigma_0$ and $\alpha$ such that $P(\sigma>\sigma_0)=\alpha$. For the range and standard deviation of the spatial field and the fixed effect *a* in each model, the prior values were based on previous knowledge of the flight range of *Ae. aegypti* and the range of the weighted variable *a*. 
+ 
+
+```{r prior table, echo=F}
+# table describing the priors tested in the prior sensitivity analysis
+table.prior <- data.frame(
+  Effect = c(
+    "original",
+    "",
+    "$\\gamma_{i}$ Spatial autocorrelation random effect",
+    "",
+    "",
+    "",
+    "$\\delta_{t}$ RW1 random effect",
+    "",
+    "",
+    "$\\eta_{i}$ iid random effect",
+    "",
+    "",
+    "$\\beta_{a}$ Fixed effect of spraying house i at time t",
+    ""
+  ),
+  varying.parameters = c(
+    "$range = c(10,0.01); \\sigma = c(1, 0.01)$",
+    "$range = c(0.1,0.01); \\sigma = c(1, 0.01)$",
+    "$range = c(100,0.01); \\sigma = c(1, 0.01)$",
+    "$range = c(10,0.01); \\sigma = c(0.5, 0.01)$",
+    "$range = c(10,0.01); \\sigma = c(3, 0.01)$",
+    "$\\sigma_{0} = 1; \\alpha = 0.01$",
+    "$\\sigma_{0} = 0.25; \\alpha = 0.05$",
+    "$\\sigma_{0} = 0.5; \\alpha = 0.05$",
+    "$\\sigma_{0} = 0.1; \\alpha = 0.05$",
+    "$\\sigma_{0} = 1; \\alpha = 0.05$",
+    "$\\sigma_{0} = 3; \\alpha = 0.05$",
+    "mean=0, precision= 10",
+    "mean=0, precision= 1",
+    "mean=0, precision= 0.5"
+  ),
+  Label = c(
+    "original",
+    "spde2.1", "spde2.2", "spde2.3", "spde2.4",
+    "rw1.1", "rw1.2", "rw1.3",
+    "iid.1", "iid.2", "iid.3",
+    "a.g20.1", "a.g20.2", "a.g20.3"
+  )
+) %>%
+  rename("Varying parameters" = varying.parameters)
+
+
+kable(table.prior,
+  caption = "Prior sensitivity analysis",
+  escape = FALSE,
+  booktabs = T
+) %>%
+  kable_styling(latex_options = c("scale_down", "hold_position")) %>%
+  collapse_rows(columns = 3, latex_hline = "none", valign = "top")
+```
+
+```{r Fig S1 prior sensitivity analysis, fig.cap="Comparison of model results using alternative priors for fixed and random effects, both in models that only included the effect of spray within a household ($a$) as well as in models that included an additional effect for sprays in the surrounding houses ($a + b$). A) Prior selection effect on rate ratio. B) Prior selection effect on WAIC.", fig.width = 6.4, fig.height = 8.6}
+########### read in data
+
+waic.priors <- readRDS(here("analysis", "data", "derived_data", "results", "waic.priors.rds"))
+
+fe.priors <- readRDS(here("analysis", "data", "derived_data", "results", "fe.priors.rds"))
+
+########### prior.fe
+
+prior.fe <- fe.priors %>%
+  filter(variable != "Intercept") %>%
+  mutate(
+    # if the prior is for the fixed effect g20, annotate as a.g20.[1-3]
+    prior = case_when(
+      str_detect(prior, "fe") == TRUE ~ str_replace(prior, "fe", "a"),
+      TRUE ~ prior
+    ),
+    # descriptive annotation for the fixed effects included in the models tested in prior sensitivity analysis
+    variable = case_when(
+      variable == "g20_day.max" ~ r"($a_{f_{gaussian,\sigma=20}(\Delta t_{c})}$)",
+      TRUE ~ r"($b_{f_{inverse}(d_{ij})}$)"
+    ),
+    compare_vbles = model,
+
+    # model structure for models tested
+    fixed.effect = case_when(
+      compare_vbles == "time" ~ "spde + rw1 + iid + a",
+      TRUE ~ "spde + rw1 + iid + a + b"
+    )
+  ) %>%
+  mutate(
+    prior = fct_relevel(prior, c(
+      "original",
+      "spde2.1", "spde2.2", "spde2.3", "spde2.4",
+      "rw1.1", "rw1.2", "rw1.3",
+      "iid.1", "iid.2", "iid.3",
+      "a.g20.1", "a.g20.2", "a.g20.3"
+    ))
+  )
+
+# plot the estimates of the fixed effects included in the models
+plot.prior.fe <- ggplot(data = prior.fe, group = prior) +
+  # points represent the mean of the fixed effect estimate
+  geom_point(aes(y = variable, x = mean, color = prior),
+    size = 1.5, alpha = 0.8, position = position_dodge(width = 1)
+  ) +
+  # error bar is the 95%CI
+  geom_errorbarh(aes(y = variable, xmin = q0.025, xmax = q0.975, color = prior), alpha = 0.8, height = .3, position = position_dodge(width = 1)) +
+  geom_vline(xintercept = 1) +
+  # manually define the priors used and the colors that represent them
+  scale_color_manual(values = c(
+    "spde2.1" = "#08519c", "spde2.2" = "#3182bd", "spde2.3" = "#7ABADF", "spde2.4" = "#bdd7e7",
+    "rw1.1" = "#1b7837", "rw1.2" = "#31a354", "rw1.3" = "#bae4b3",
+    "iid.1" = "#fb6a4a", "iid.2" = "#fcae91", "iid.3" = "#fee5d9",
+    "a.g20.1" = "#8D73BD", "a.g20.2" = "#D4ACF2", "a.g20.3" = "#DCC2F0",
+    "original" = "black"
+  )) +
+  scale_y_discrete(labels = TeX(prior.fe$variable)) + # TeX allows the equations to be plotted in ggplot
+  # facet grid by experiment and model structure
+  facet_grid(fixed.effect ~ experiment,
+    scales = "free", space = "free",
+    labeller = labeller(fixed.effect = label_wrap_gen(width = 20))
+  ) +
+  labs(
+    y = "Variable", x = "Rate Ratio",
+    colour = "Varying priors"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(
+    legend.text.align = 0,
+    strip.text = element_text(size = 9)
+  )
+
+
+# For f.e, spde + rw1 + iid + A, 2013:  A.g20.1 produces a markedly different rate ratio for A
+# For f.e, spde + rw1 + iid + A, 2013:  A.g20.2 and spde2.1 produce a markedly different rate ratio for A
+
+# For f.e, spde + rw1 + iid + A + B, 2013:  A.g20.1 produce a markedly larger rate ratio for A , iid.1 is the smallest. for B none of the results are markedly different
+
+# For f.e, spde + rw1 + iid + A + B, 2014:  A.g20.1 and spde2.1 produce a markedly larger rate ratio for A. for B none of the results are markedly different
+
+########### prior waic
+
+# list of the labels of all the priors used
+prior.names <- unique(waic.priors$prior)
+
+prior.waic <- waic.priors %>%
+  mutate(
+    prior = case_when(
+      str_detect(prior, "fe") == TRUE ~ str_replace(prior, "fe", "a"),
+      TRUE ~ prior
+    ),
+    compare_vbles = model,
+    fixed.effect = case_when(
+      compare_vbles == "time" ~ " spde + rw1 + iid + a ",
+      TRUE ~ "spde + rw1 + iid + a + b"
+    )
+  ) %>%
+  mutate(
+    prior = fct_relevel(prior, c(
+      "original",
+      "spde2.1", "spde2.2", "spde2.3", "spde2.4",
+      "rw1.1", "rw1.2", "rw1.3",
+      "iid.1", "iid.2", "iid.3",
+      "a.g20.1", "a.g20.2", "a.g20.3"
+    ))
+  )
+
+
+plot.d.waic.prior <- ggplot(prior.waic %>%
+  mutate(rank_waic = desc(rank_waic))) +
+  geom_point(aes(y = rank_waic, x = d.mean.waic, color = prior, shape = model), size = 1.5, position = position_dodge(width = 1)) +
+  geom_errorbarh(aes(y = rank_waic, x = d.mean.waic, xmin = ci.d.l, xmax = ci.d.u, color = prior), height = .3, position = position_dodge(width = 1)) +
+  geom_vline(xintercept = 0) +
+  # facet grid by experiment
+  facet_grid(. ~ experiment,
+    scales = "free", space = "free",
+    # wider facet label
+    labeller = labeller(fixed.effect = label_wrap_gen(width = 20))
+  ) +
+  # manually define the priors used and the colors that represent them
+  scale_color_manual(values = c(
+    "spde2.1" = "#08519c", "spde2.2" = "#3182bd", "spde2.3" = "#7ABADF", "spde2.4" = "#bdd7e7",
+    "rw1.1" = "#1b7837", "rw1.2" = "#31a354", "rw1.3" = "#bae4b3",
+    "iid.1" = "#fb6a4a", "iid.2" = "#fcae91", "iid.3" = "#fee5d9",
+    "a.g20.1" = "#8D73BD", "a.g20.2" = "#D4ACF2", "a.g20.3" = "#DCC2F0",
+    "original" = "black"
+  )) +
+  labs(
+    y = "WAIC rank", x = "Difference in WAIC (95% CI)",
+    colour = "Varying priors",
+    shape = "Model structure"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(legend.position = "none")
+
+
+prior.wiac.exp <- prior.waic %>%
+  filter(ci.d.l > 1)
+
+# the priors that cause the greatest difference both in the 2013 and 2014 experiments are spde2.1 and iid.1
+
+fig.S1 <- (plot.prior.fe / plot.d.waic.prior) +
+  plot_layout(guides = "collect") +
+  plot_annotation(
+    title = "Additional file 1: Figure S1",
+    tag_levels = "A"
+  )
+
+fig.S1
+```
+
+
+# Within-household spray effects (*a*)
+
+```{r A simple spray effects, echo=F, results='asis' }
+# table describing the continuous and discrete candidate variables measuring within-household spray effect
+
+# order in which variables should appear
+time.simple.order <- c(
+  "Zone",
+  "Sprayed",
+  "Number of sprays",
+  "Days since the most recent spray",
+  "Weeks since most recent spray",
+  "Sprayed 1week prior",
+  "Sprayed 2weeks prior",
+  "Sprayed 3weeks prior",
+  "Sprayed 4weeks prior",
+  "Sprayed 5weeks prior",
+  "Sprayed 6weeks prior",
+  "Sprayed 1week prior+ sprayed 2weeks prior",
+  "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior",
+  "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior ",
+  "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior + sprayed 5weeks prior ",
+  "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior + sprayed 5weeks prior+ sprayed 6weeks prior"
+)
+
+table.time.simple <- data.frame(
+  spray.effect = c(
+    "Days since the most recent spray",
+    "Number of sprays",
+    "Sprayed",
+    "Sprayed 1week prior",
+    "Sprayed 1week prior+ sprayed 2weeks prior",
+    "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior",
+    "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior ",
+    "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior + sprayed 5weeks prior ",
+    "Sprayed 1week prior+ sprayed 2weeks prior +\n sprayed 3weeks prior +sprayed 4weeks prior + sprayed 5weeks prior+ sprayed 6weeks prior",
+    "Sprayed 2weeks prior",
+    "Sprayed 3weeks prior",
+    "Sprayed 4weeks prior",
+    "Sprayed 5weeks prior",
+    "Sprayed 6weeks prior",
+    "Weeks since most recent spray",
+    "Zone"
+  )
+) %>%
+  mutate(Description = case_when(
+    spray.effect == "Zone" ~ "House in spray zone/house in buffer zone",
+    spray.effect == "Sprayed" ~ "Was house i sprayed previously? yes/no",
+    spray.effect == "Number of sprays" ~ "How many times was house i sprayed previously? 1,2...6",
+    spray.effect == "Days since the most recent spray" ~ "$max(\\Delta t_{c})$",
+    spray.effect == "Weeks since most recent spray" ~ "$\\frac{max(\\Delta t_{c})}{7}$",
+    str_detect(spray.effect, "\\+ ") == TRUE ~ "Was house i sprayed in any of the indicated previous weeks?",
+    TRUE ~ "Was house i sprayed in the indicated previous week?"
+  )) %>%
+  # arrange by previously defined order
+  arrange(factor(spray.effect, levels = time.simple.order)) %>%
+  rename("Spray effect" = spray.effect)
+
+
+
+print(kable(table.time.simple,
+  # labels the table
+  caption = "\\label{tab:TableS2}Discrete and continuous time variables measuring the spray effect on house i",
+  escape = FALSE,
+  booktabs = T
+) %>%
+  # forces the first column to a certain width so the text will wrap
+  column_spec(1, width = "32em") %>%
+  column_spec(2, width = "10em") %>%
+  kable_styling(
+    latex_options = c("scale_down", "hold_position"),
+    font_size = 10
+  ) %>%
+  collapse_rows(columns = 2, valign = "top"))
+```
+
+```{r A weighted spray effects, echo=F, results='asis'}
+# table describing the candidate variables measuring within-household spray effect by assigning a weight to time since spray using a decay function
+
+table.time.decay <- data.frame(
+  spray.effect = c(
+    "Inverse weight of the most recent spray",
+    "Cumulative inverse weight of all previous sprays",
+    "Gaussian weight of the most recent spray",
+    "Cumulative Gaussian weight of all previous sprays",
+    "Exponential weight of the most recent spray",
+    "Cumulative exponential weight of all previous sprays"
+  ),
+  Description = c(
+    "$max(\\frac{1}{\\Delta t_{c}})$",
+    "$\\sum_{c=1}^6\\frac{1}{\\Delta t_{c}}$",
+    "$max(e^{-\\frac{\\Delta t_{c}^2}{2\\times\\sigma^2}})$",
+    "$ \\sum_{c=1}^6 e^{-\\frac{\\Delta t_{c}^2}{2\\times\\sigma^2}}$",
+    "$max(e^{-(k \\times \\Delta t_{c})})$",
+    "$\\sum_{c=1}^6 e^{-(k \\times \\Delta t_{c})}$"
+  ),
+  varying.parameters = c(
+    "",
+    "",
+    "$\\sigma= 1,3,5,7,10,15,20,25,30,35,40,50,60,80$",
+    "$\\sigma= 1,3,5,7,10,15,20,25,30,35,40,50,60,80$",
+    "$k=0.005,0.01,0.015,0.02,0.03,0.04,0.06,0.1,0.2,0.4,1$",
+    "$k=0.005,0.01,0.015,0.02,0.03,0.04,0.06,0.1,0.2,0.4,1$"
+  )
+) %>%
+  rename(
+    "Spray effect" = spray.effect,
+    "Varying parameters" = varying.parameters
+  )
+
+
+
+
+
+kable(table.time.decay,
+  caption = "A. Weighted time variables measuring the spray effect on house i",
+  escape = FALSE,
+  booktabs = T
+) %>%
+  kable_styling(
+    latex_options = c("scale_down", "hold_position"),
+    font_size = 10
+  ) %>%
+  column_spec(1, width = "10em") %>%
+  collapse_rows(columns = 3, valign = "top")
+```
+
+
+```{r Additional file 1 FigS2 plot time curves, fig.cap="Visual representation of decay functions used to calculate candidate variables that assigned a weight to the days between the date of the adult survey t and the date of a spray event that occurred prior to t ($\\Delta t_{c}$). ", fig.width = 6.6, fig.height = 5}
+# Visual representation of decay functions used to calculate candidate *a* variables
+
+time.decay.order <- c(
+  "k=0.005", "k=0.01", "k=0.015", "k=0.02", "k=0.03", "k=0.04", "k=0.06", "k=0.1", "k=0.2", "k=0.4", "k=1",
+  "sigma=1", "sigma=3", "sigma=5", "sigma=7", "sigma=10", "sigma=15", "sigma=20", "sigma=25", "sigma=30", "sigma=35", "sigma=40", "sigma=50", "sigma=60", "sigma=80", "inverse"
+)
+
+# Gaussian and exponential decay curves ave separate color palettes
+# uses scales::hue_pal to select colors
+color.g.time <- hue_pal(h = c(0, 360))(14) # there are 14 candidate Gaussian functions
+color.k.time <- hue_pal(h = c(50, 350))(11) # there are 11 candidate exponential functions
+time.decay.color <- c(color.k.time, color.g.time, "black")
+
+# combine colors
+time.color.df <- data.frame(curve = time.decay.order, color = time.decay.color)
+
+decay.time.plot <- decay.time %>%
+  # define the order of the curves
+  mutate(curve = fct_relevel(
+    curve, "k=0.005", "k=0.01", "k=0.015", "k=0.02", "k=0.03", "k=0.04", "k=0.06", "k=0.1", "k=0.2", "k=0.4", "k=1",
+    "sigma=1", "sigma=3", "sigma=5", "sigma=7", "sigma=10", "sigma=15", "sigma=20", "sigma=25", "sigma=30", "sigma=35", "sigma=40", "sigma=50", "sigma=60", "sigma=80", "inverse"
+  ))
+
+# plot the curves of the
+p.curves.time <- ggplot(decay.time.plot, aes(x = days, y = y)) +
+  # color varies by varying parameter and the line pattern depends on the decay function
+  geom_line(aes(color = curve, linetype = decay)) +
+  scale_color_manual(
+    # manually define the varying parameters for the functions and the colors that represent them using the palette chosen above
+    labels = parse(text = c(
+      "k==0.005", "k==0.01", "k==0.015", "k==0.02", "k ==0.03", "k ==0.04", "k ==0.06", "k ==0.1", "k ==0.2", "k ==0.4", "k ==1",
+      "sigma ==1", "sigma ==3", "sigma ==5", "sigma ==7", "sigma ==10", "sigma ==15", "sigma ==20", "sigma ==25", "sigma ==30", "sigma ==35", "sigma ==40", "sigma ==50", "sigma ==60", "sigma ==80", "inverse"
+    )),
+    values = time.decay.color
+  ) +
+  ylim(0, 1) +
+  labs(
+    title = "Additional file 1: Figure S2",
+    y = "Temporal weight", x = "Days since spray event",
+    colour = "Varying parameter",
+    linetype = "Decay function"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  theme(legend.text.align = 0)
+
+p.curves.time
+```
+
+
+# Effects of sprays in neighboring households (*b*)
+
+```{r B. simple spray effects, echo=F, results='asis'}
+# table describing the candidate variables measuring spray effect of the surrounding houses using proportion of houses sprayed within a distance ring
+
+table.dist.simple <- data.frame(
+  spray.effect = c(
+    "\\% Sprayed 0-100m",
+    "\\% Sprayed 0-100m + \\% sprayed 101-200m",
+    "\\% Sprayed 0-100m + \\% sprayed 101-200m + \\% sprayed 201-300m",
+    "\\% Sprayed 0-100m + \\% sprayed 101-200m + \\% sprayed 201-300m + \\% sprayed 301-400m",
+    "\\% Sprayed 0-100m + \\% sprayed 101-200m + \\% sprayed 201-300m + \\% sprayed 301-400m + \\% sprayed 401-500m",
+    "\\% Sprayed 0-100m + \\% sprayed 101-200m + \\% sprayed 201-300m + \\% sprayed 301-400m + \\% sprayed 401-500m + \\%sprayed >500m",
+    "\\% sprayed 0-31m",
+    "\\% Sprayed 0-31m + \\% sprayed 31-100m",
+    "\\% Sprayed 0-31m + \\% sprayed 31-100m + \\% sprayed 101-300m",
+    "\\% Sprayed 0-31m + \\% sprayed 31-100m + \\% sprayed 101-300m + \\% sprayed >300m"
+  ),
+  description = c(rep("Proportion of houses sprayed in the previous week within a ring of a given distance from house i", 10))
+) %>%
+  rename(
+    "Spray effect" = spray.effect,
+    "Description" = description
+  )
+
+kable(table.dist.simple,
+  caption = "B. Simple spray effects  of surrounding houses",
+  escape = FALSE,
+  booktabs = T
+) %>%
+  column_spec(1, width = "30em") %>%
+  column_spec(2, width = "10em") %>%
+  kable_styling(
+    latex_options = c("scale_down", "hold_position"),
+    font_size = 10
+  ) %>%
+  collapse_rows(columns = 2, valign = "top")
+```
+
+
+```{r B weighted spray effects, echo=F, results='asis'}
+# table describing the candidate variables the candidate variables measuring spray effect of the surrounding houses by assigning a weight to distance from house i defined by decay function
+table.dist.decay <- data.frame(
+  spray.effect = c(
+    "Inverse cumulative weight of sprays in the study area",
+    "Gaussian cumulative weight of sprays in the study area",
+    "Exponential cumulative weight of sprays in the study area"
+  ),
+  Description = c(
+    "$\\sum_{j}(\\frac{1}{d_{ij}}) \\times f_{m_{best\\ a}}(\\Delta t_{c})$",
+    "$\\sum_{j}(e^{-\\frac{d_{ij}^2}{2\\times\\sigma^2}}) \\times f_{m_{best\\ a}}(\\Delta t_{c}))$",
+    "$\\sum_{j}(e^{-(k \\times d_{ij})})) \\times f_{m_{best\\ a}}(\\Delta t_{c}))$"
+  ),
+  varying.parameters = c(
+    "",
+    "$\\sigma= 5, 25, 50, 75,100, 125, 150, 200, 250, 300$",
+    "$k=0.0025, 0.0035, 0.005, 0.0075, 0.01, 0.0125, 0.02, 0.045, 0.2$"
+  )
+) %>%
+  rename(
+    "Spray effect" = spray.effect,
+    "Varying parameters" = varying.parameters
+  )
+
+
+
+
+
+kable(table.dist.decay,
+  caption = "B. Weighted spray effects of surrounding houses",
+  escape = FALSE,
+  booktabs = T
+) %>%
+  # kable_styling(latex_options = c("scale_down", "hold_position")) %>%
+  # collapse_rows(columns=3,latex_hline="none",valign="top")
+  kable_styling(
+    latex_options = c("scale_down", "hold_position"),
+    font_size = 10
+  ) %>%
+  column_spec(1, width = "10em") %>%
+  # column_spec(3, width = "20em") %>%
+  collapse_rows(columns = 3, valign = "top") # , latex_hline="none")
+```
+
+
+```{r Additional file 1 FigS3 plot distace curves, fig.cap= "Visual representation of decay functions used to calculate candidate variables that assigned a weight to the distance (in m) between the household i and every surrounding household j ($d_{ij}$)", fig.width = 6.6, fig.height = 5}
+# Visual representation of decay functions used to calculate candidate *b* variables
+
+
+# Gaussian and exponential decay curves ave separate color palettes
+# uses scales::hue_pal to select colors
+color.g <- hue_pal(h = c(50, 200), l = 50)(10) # there are 10 candidate Gaussian functions
+color.k <- hue_pal(h = c(280, 400))(9) # there are 9 candidate exponential functions
+dist.decay.color <- c(color.k, color.g, "black")
+
+
+
+decay.dist.plot <- decay.distance %>%
+  # define the order of the curves
+  mutate(curve = fct_relevel(curve, c("k=0.0025", "k=0.0035", "k=0.005", "k=0.0075", "k=0.01", "k=0.0125", "k=0.02", "k=0.045", "k=0.2", "sigma=5", "sigma=25", "sigma=50", "sigma=75", "sigma=100", "sigma=125", "sigma=150", "sigma=200", "sigma=250", "sigma=300", "inverse")))
+
+p.curves.distance <- ggplot(decay.dist.plot, aes(x = dist, y = y)) +
+  # color varies by varying parameter and the line pattern depends on the decay function
+  geom_line(aes(color = curve, linetype = decay)) +
+  # manually define the varying parameters for the functions and the colors that represent them using the palette chosen above
+  scale_color_manual(
+    labels = parse(text = c(c("k==0.0025", "k==0.0035", "k==0.005", "k==0.0075", "k==0.01", "k==0.0125", "k==0.02", "k==0.045", "k==0.2", "sigma==5", "sigma==25", "sigma==50", "sigma==75", "sigma==100", "sigma==125", "sigma==150", "sigma==200", "sigma==250", "sigma==300", "inverse"))),
+    values = dist.decay.color
+  ) +
+  ylim(0, 1) +
+  guides(color = guide_legend(nrow = 10)) +
+  labs(
+    title = "Additional file 1: Figure S3",
+    y = "Spatial weight", x = "Days since spray event",
+    colour = "Varying parameter",
+    linetype = "Decay function"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  theme(
+    legend.text.align = 0,
+    legend.box = "vertical"
+  )
+
+p.curves.distance
+```
+
+# Cumulative effects of sequential sprays
+
+```{r Additional file 1 FigS4 plot Cumulative effects,fig.cap= "Comparison of the estimated spray effect between models where variable $a$ assigned a weighted value to the most recent spray ($a_{it} = max(f(\\Delta t_{c}))$) (blue) vs. models where variable $a$ was a cumulative value of the weights of all previous spray events ($a_{it} = \\sum_{6}^1(f(\\Delta t_{c}))$) (red).", fig.width = 6.6, fig.height = 5}
+# read in fixed effect estimates for within_household candidate models
+f.e.time <- readRDS(here("analysis", "data", "derived_data", "results", "f.e.time.rds"))
+
+# prepare data set that removes the discrete and continuous variables
+# and orders the spray effect names
+f.e.cumulative <- f.e.time %>%
+  filter(spray.effect.weight.type != "Categorical") %>%
+  mutate(
+    spray.effect.type =
+      fct_relevel(
+        spray.effect.type,
+        "Exponential 0.005", "Exponential 0.01", "Exponential 0.015", "Exponential 0.02", "Exponential 0.03", "Exponential 0.04", "Exponential 0.06", "Exponential 0.1", "Exponential 0.2", "Exponential 0.4", "Exponential 1",
+        "Gaussian 80", "Gaussian 60", "Gaussian 50", "Gaussian 40", "Gaussian 35", "Gaussian 30", "Gaussian 25", "Gaussian 20", "Gaussian 15", "Gaussian 10", "Gaussian 7", "Gaussian 5", "Gaussian 3", "Gaussian 1",
+        "Inverse day", "Inverse week"
+      )
+  )
+
+# for the same decay function used to assign weights to spray effects
+# assign color based on whether the spray effect was
+# a weighted value to the most recent spray
+# a cumulative value of the weights of all previous spray events
+plot.f.e.cumulative <- ggplot() +
+  # points represent the mean of the fixed effect estimate
+  geom_point(
+    data = f.e.cumulative,
+    aes(y = spray.effect.type, x = mean, color = spray.effect.weight.type),
+    size = 3,
+    alpha = 0.9,
+    position = position_dodge(width = 0.5)
+  ) +
+  # error bar is the 95%CI
+  geom_errorbarh(
+    data = f.e.cumulative %>% filter(sd < 50),
+    aes(y = spray.effect.type, xmin = q0.025, xmax = q0.975, color = spray.effect.weight.type),
+    height = .3,
+    alpha = 0.9,
+    position = position_dodge(width = 0.5)
+  ) +
+  geom_vline(xintercept = 1) +
+  # facet grid by experiment
+  facet_grid(. ~ experiment, scales = "free", space = "free") +
+  labs(
+    title = "Additional file 1: Figure S4",
+    y = TeX(r"(Candidate variables that assign weight by $f(\Delta_{c})$)"),
+    x = "Rate ratio",
+    colour = "Type of weighting"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(
+    legend.text.align = 0,
+    axis.text.x = element_text(size = 8),
+    # legend at the bottom of the plot
+    legend.position = "bottom"
+  )
+
+plot.f.e.cumulative
+```
+
+
+# Comparison of within-household spray effect measurements using weighted vs. non-weighted variables
+
+```{r Figure S5 plot, dpi=300, fig.cap="Comparison of WAIC rank between all the models that did not use a decay function to assign a weighted value to $\\Delta t_{c}$ and the best 5 fitting models. Only the spray effect measures with the top 11 WAIC ranks are named, those labeled ‘Other spray effect measure’ can be found in Additional file 1: Table S2"}
+# read in waic values for within_household candidate models
+waic.time <- readRDS(here("analysis", "data", "derived_data", "results", "waic.time.rds"))
+
+# set white background
+theme_set(theme_bw())
+
+waic.time.cat <- waic.time %>%
+  # remove waic for models with only random effects
+  filter(compare_vbles != "random") %>%
+  # select models that include a continuous or discrete variable or the 5 best models by WAIC rank
+  filter(spray.effect.weight.type == "Categorical" | rank_waic %in% seq(1:5)) %>%
+  # describe the variables
+  mutate(
+    variable.type = case_when(
+      spray.effect.weight.type == "Categorical" ~ "Not weighted using decay functions",
+      TRUE ~ "Weighted using decay functions"
+    ),
+    # if the model is among the top 11, define the variables in the model,
+    # otherwise assign "Other spray effect measure"
+    spray.effect.measure = case_when(
+      rank_waic %in% seq(1:11) ~ spray.effect,
+      TRUE ~ "Other spray effect measure"
+    )
+  ) %>%
+  # more informative labels for the variable description
+  mutate(spray.effect.measure = recode(spray.effect.measure,
+    "sprayed 1week ago+ sprayed 2weeks ago + sprayed 3weeks ago +sprayed 4weeks ago " =
+      "sprayed 1week ago+ sprayed 2weeks ago +\nsprayed 3weeks ago +sprayed 4weeks ago",
+    "sprayed 1week ago+ sprayed 2weeks ago + sprayed 3weeks ago +sprayed 4weeks ago + sprayed 5weeks ago " =
+      "sprayed 1week ago+ sprayed 2weeks ago +\nsprayed 3weeks ago +sprayed 4weeks ago +\nsprayed 5weeks ago",
+    "sprayed 1week ago+ sprayed 2weeks ago + sprayed 3weeks ago +sprayed 4weeks ago + sprayed 5weeks ago+ sprayed 6weeks ago" =
+      "sprayed 1week ago+ sprayed 2weeks ago +\nsprayed 3weeks ago +sprayed 4weeks ago +\nsprayed 5weeks ago+ sprayed 6weeks ago"
+  )) %>%
+  mutate(
+    spray.effect = fct_reorder(spray.effect, desc(rank_waic)),
+    variable.type = fct_relevel(variable.type, c("Weighted \nusing decay functions", "Not weighted \nusing decay functions"))
+  )
+
+
+plot.d.waic.time.cat.rank <-
+  ggplot(waic.time.cat %>%
+    mutate(rank_waic = desc(rank_waic))) +
+  # points represent the difference in WAIC with the WAIC value of the best-fitting model
+  geom_point(
+    aes(y = rank_waic, x = d.mean.waic, color = spray.effect.measure, shape = variable.type),
+    size = 2,
+    position = position_dodge(width = 1)
+  ) +
+  # error bar is the 95%CI
+  geom_errorbarh(
+    aes(y = rank_waic, x = d.mean.waic, xmin = ci.d.l, xmax = ci.d.u, color = spray.effect.measure),
+    height = .3, position = position_dodge(width = 1)
+  ) +
+  # draw a vertical line at x=0
+  geom_vline(xintercept = 0) +
+  # facet grid by experiment
+  facet_grid(. ~ experiment,
+    scales = "free", space = "free",
+    labeller = labeller(variable.type = label_wrap_gen(width = 5))
+  ) +
+  labs(
+    title = "Additional file 1: Figure S5",
+    x = "Difference in WAIC (95% CI)", y = "WAIC rank",
+    colour = "Spray effect measure",
+    shape = "Type of spray effect"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  # left align text in legend
+  theme(legend.text.align = 0)
+
+plot.d.waic.time.cat.rank
+```
+
+
+
+
+# Effects of sprays in neighboring households
+
+
+```{r Figure S6 DATA decay sur waic 2014 baseline g20, fig.cap= "Difference in WAIC between $m_{best}$, the best fitting model for within-household spray effects, where the spray effect is measured by $a_{f_{gaussian,\\sigma=20}(\\Delta t_{c})}$ (in blue), and models with an additional effect that measures the sprays in the neighboring households (in red). A) The additional effect of sprays in the neighboring households is measured by a proportion of houses sprayed in the previous week within a given distance ring. B) The additional effect of sprays in the neighboring households is measured by a cumulative weight of the distance in time and space since a neighboring house was sprayed for the entire area within 1,000 m of a given household.", fig.width = 6.6, fig.height = 6.6 }
+# read in waic values for within_household candidate models
+waic.space <- readRDS(here("analysis", "data", "derived_data", "results", "waic.space.rds"))
+
+# create an object with the WAIC rank of $m_best$ for 2013 and 2014
+time.rank.waic.13 <- waic.space[which(waic.space$experiment == "2013" & waic.space$fixed.s == "g20_day.max"), ][["rank_waic"]]
+time.rank.waic.14 <- waic.space[which(waic.space$experiment == "2014" & waic.space$fixed.s == "g20_day.max"), ][["rank_waic"]]
+
+###### data frame for models where the additional effect of sprays in the neighboring households is measured by a proportion of houses sprayed in the previous week within a given distance ring.
+waic.space.rings <- waic.space %>%
+  mutate(
+    # fixed effects included in the model
+    fixed.effect = case_when(
+      compare_vbles == "time" ~ "random + A",
+      TRUE ~ "random + A + B"
+    ),
+    #  fixed effects included in the model where the variable from m_best is described as a function
+    model = case_when(
+      compare_vbles == "time" ~ r"(random + $f_{gaussian,\sigma=20}(\Delta t_{c})$)",
+      TRUE ~ r"(random + $f_{gaussian,\sigma=20}(\Delta t_{c})$ + B)"
+    ),
+    # further describe the variables with subscripts
+    type.model = case_when(
+      spray.effect.weight.type == "cumulative weight of sprays in the study area" ~
+        r"($a + b_{cumulative \ \weight \ \of \ \surrounding \ \sprays}$)",
+      spray.effect.weight.type == "proportion sprayed in ring" ~
+        r"($a + b_{proportion \ \houses \ \sprayed \ \per \ \ring}$)",
+      spray.effect.weight.type == "weight of the most recent spray" ~ "a"
+    ),
+    # further describe the variables with words
+    spray.effect.weight.words = spray.effect.weight.type,
+    spray.effect.weight.type = case_when(
+      spray.effect.weight.type == "cumulative weight of sprays in the study area" ~ "cumulative weight of \nsprays over space and time",
+      spray.effect.weight.type == "proportion sprayed in ring" ~ "proportion of houses \nsprayed within a distance ring",
+      spray.effect.weight.type == "weight of the most recent spray" ~ r"($f_{gaussian,\sigma=20}(\Delta t_{c})$)"
+    )
+  ) %>%
+  # order variables
+  mutate(
+    spray.effect = fct_reorder(spray.effect, desc(d.mean.waic)),
+    fixed.effect = fct_relevel(fixed.effect, c("random + a + b", "random + a"))
+  )
+
+waic.space.rings.prop <- waic.space.rings %>%
+  filter(spray.effect.weight.type == "$f_{gaussian,\\sigma=20}(\\Delta t_{c})$" |
+    spray.effect.weight.type == "proportion of houses \nsprayed within a distance ring")
+
+# plot models where the additional effect of sprays in the neighboring households is measured by a proportion of houses sprayed in the previous week within a given distance ring.
+plot.waic.space.rings.prop <- ggplot(waic.space.rings.prop) +
+  # points represent the difference in WAIC of each model with the WAIC value of the best-fitting model measuring within-household spray effects (m_best)
+  geom_point(
+    aes(
+      y = rank_waic, x = d.mean.waic,
+      color = type.model
+    ),
+    size = 1, position = position_dodge(width = 1)
+  ) +
+  # error bar is the 95%CI
+  geom_errorbarh(
+    aes(
+      y = rank_waic, x = d.mean.waic, xmin = ci.d.l, xmax = ci.d.u,
+      color = type.model
+    ),
+    height = 0.3, position = position_dodge(width = 3)
+  ) +
+  scale_color_discrete(
+    labels = TeX(waic.space.rings.prop$type.model)
+  ) + # TeX is needed to display equations
+
+  geom_vline(xintercept = 0) +
+  # facet grid by experiment
+  facet_grid(. ~ experiment) +
+  labs(
+    x = "Difference in WAIC (95% CI)", y = "WAIC rank",
+    colour = "Type of spray effect measure",
+    shape = "Model structure"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  theme(legend.text.align = 0)
+
+
+##### data frame for models where the additional effect of sprays in the neighboring households is measured by by a cumulative weight of the distance in time and space since a neighboring house was sprayed for the entire area within 1,000 m of a given household.
+waic.space.rings.decay <- waic.space.rings %>%
+  # select only models that include a variable that was calculated using a decay function, not the proportion houses sprayed
+  filter(spray.effect.weight.type == "$f_{gaussian,\\sigma=20}(\\Delta t_{c})$" |
+    spray.effect.weight.type != "proportion of houses \nsprayed within a distance ring")
+
+# plot models where the additional effect of sprays in the neighboring households is measured by by a cumulative weight of the distance in time and space since a neighboring house was sprayed for the entire area within 1,000 m of a given household.
+plot.waic.space.rings.decay <- ggplot(waic.space.rings.decay) +
+  # points represent the difference in WAIC of each model with the WAIC value of the best-fitting model measuring within-household spray effects (m_best)
+  geom_point(
+    aes(
+      y = rank_waic, x = d.mean.waic,
+      color = type.model
+    ),
+    size = 1, position = position_dodge(width = 1)
+  ) +
+  # error bar is the 95%CI
+  geom_errorbarh(
+    aes(
+      y = rank_waic, x = d.mean.waic, xmin = ci.d.l, xmax = ci.d.u,
+      color = type.model
+    ),
+    height = 0.3, position = position_dodge(width = 3)
+  ) +
+  scale_color_discrete(
+    labels = TeX(waic.space.rings.decay$type.model) # TeX is needed to display equations
+  ) +
+  geom_vline(xintercept = 0) +
+  # facet grid by experiment
+  facet_grid(. ~ experiment) +
+  labs(
+    x = "Difference in WAIC (95% CI)", y = "WAIC rank",
+    colour = "Type of spray effect measure",
+    shape = "Model structure"
+  ) +
+  theme_bw(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  theme(legend.text.align = 0)
+
+
+# collate both plots using patchwork::
+fig.4 <- (plot.waic.space.rings.prop / plot.waic.space.rings.decay) +
+  plot_annotation(
+    title = "Additional file 1: Figure S6",
+    # add A and B labels to top corner
+    tag_levels = "A"
+  )
+
+fig.4
+```

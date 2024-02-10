@@ -1,0 +1,225 @@
+---
+title: "model.fx"
+author: "Ania Kawiecki"
+date: "1/25/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, warning=FALSE, message=FALSE}
+library(pacman)
+pacman::p_load(INLA, tidyverse, sf, lubridate, parallel, here)
+```
+
+# FUNCTIONS FOR MODEL COMPARISON 
+
+## Functions used for entire analyses
+
+### Function that extracts parameter estimates of the fixed effects for each model 
+
+```{r function fixed effect extraction for inla class models }
+#' Extract fixed effect estimates from model list
+#'
+#' This function takes a list of INLA models as input and returns data frame of the fixed effects for each model.
+#'
+#' @param m A list of INLA models.
+#' @return A data frame of the fixed effects for each model.
+#'
+fx.fix.eff <- function(m) {
+  #' Extract fixed effect estimates from model
+  #'
+  #' This function takes an INLA model as input and returns data frame of the fixed effects for each model.
+  #'
+  #' @param x An index from a list of INLA models.
+  #' @return A row of values that identify the model and include the fixed effects estimates for the model.
+  #'
+
+  f.fix.eff.exp <- function(x) {
+    # exponentiates the model estimates to return them to the scale of the original count data
+    round(exp(m[[x]][["summary.fixed"]]), digits = 2) %>%
+      # adds a column named "variable" with the the variable names (that are presented as rownames in the INLA results)
+      rownames_to_column(var = "variable") %>%
+      # a value that lists the fixed effects in each model including the intercept
+      mutate(
+        fixed = paste(m[[x]][["names.fixed"]], collapse = "+"),
+        # a value that lists the random effects in each model
+        random = paste(m[[x]][["model.random"]], collapse = "+"),
+        # a value that lists the fixed effects in each model without the intercept (added within in our model function, not an INLA result)
+        fixed.s = m[[x]][["fixed.effect.s"]],
+        m = paste("m", x, sep = ".")
+      ) %>%
+      # renames quantile column names from INLA results for easier use
+      rename(q0.025 = "0.025quant", q0.5 = "0.5quant", q0.975 = "0.975quant")
+  }
+
+  lapply(1:length(m), f.fix.eff.exp) %>% bind_rows()
+}
+
+saveRDS(fx.fix.eff, here("analysis", "data", "derived_data", "model", "fx.fix.eff.rds"))
+```
+
+
+## Functions for within-household spray effect analyses
+
+### Function that ranks models by WAIC compared to the lowest WAIC
+
+```{r function rank WAIC}
+#' Difference in WAIC
+#'
+#' This function takes a list of INLA models as input and returns their WAIC values and difference in WAIC compared to the lowest WAIC value.
+#'
+#' @param m A list of INLA models.
+#' @return A data frame of the WAIC values and the WAIC rank of each model compared to the lowest WAIC.
+
+fx.waic <- function(m) {
+  #' Find model with lowest WAIC
+  #'
+  #' This function takes a list of INLA models as input and returns the model that has the lowest WAIC.
+  #'
+  #' @param m A list of INLA models.
+  #' @return A model with the lowest WAIC from a list of models.
+  f.waic.min <- function(m) {
+    # find the lowest WAIC value among the models
+    min.waic <- min(unlist(lapply(1:length(m), function(x) {
+      # this function extracts the WAIC value from the INLA summary for each model
+      m[[x]][["waic"]][["waic"]]
+    })))
+
+    # condition: is each model's WAIC the lowest WAIC?
+    min.waic.T <- sapply(1:length(m), function(x) m[[x]][["waic"]][["waic"]] == min.waic)
+
+    # select the model where the that model's WAIC is the lowest WAIC
+    m.min.waic <- m[min.waic.T == TRUE]
+  }
+
+  m.min.waic <- f.waic.min(m)
+
+  #' Compare WAICs
+  #'
+  #' This function takes a list of INLA models as input and returns data frame of the WAIC values and the WAIC rank of each model compared to the lowest WAIC.
+  #'
+  #' @param x An index from a list of INLA models.
+  #' @return A data frame of the WAIC values and the WAIC rank of each model compared to the lowest WAIC.
+  f.waic.compare <- function(x) {
+    n <- length(m[[x]][["waic"]][["local.waic"]])
+
+    waic.compare <- list(
+
+      # a value that lists the fixed effects in each model
+      fixed = c(paste(m[[x]][["names.fixed"]], collapse = "+")),
+      # a value that lists the fixed effects in each model without the intercept (added within in our model function, not an INLA result)
+      fixed.s = m[[x]][["fixed.effect.s"]],
+      # a value that lists the random effects in each model
+      random = c(paste(m[[x]][["model.random"]], collapse = "+")),
+      # extract waic value from each model
+      waic = m[[x]][["waic"]][["waic"]],
+      # st. error of the point-wise waic
+      s.e = as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))),
+      # lower ci of the point-wise waic
+      ci.l = m[[x]][["waic"]][["waic"]] - as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # upper ci of the point-wise waic
+      ci.u = m[[x]][["waic"]][["waic"]] + as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # difference between each model's waic and the lowest waic
+      d.mean.waic = m[[x]][["waic"]][["waic"]] - m.min.waic[[1]][["waic"]][["waic"]],
+      # st. error of the difference between each model's waic and the lowest waic
+      d.s.e = as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.min.waic[[1]][["waic"]][["local.waic"]], na.rm = TRUE))),
+      # lower ci of the difference between each model's waic and the lowest waic
+      ci.d.l = m[[x]][["waic"]][["waic"]] - m.min.waic[[1]][["waic"]][["waic"]] - as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.min.waic[[1]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # upper ci of the difference between each model's waic and the lowest waic
+      ci.d.u = m[[x]][["waic"]][["waic"]] - m.min.waic[[1]][["waic"]][["waic"]] + as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.min.waic[[1]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # prediction penalty
+      p.waic = sum(m[[x]][["waic"]][["local.p.eff"]], na.rm = TRUE),
+      # model ID: index of the model
+      m = paste("m", x, sep = ".")
+    )
+  }
+
+  df.model <- lapply(1:length(m), f.waic.compare) %>%
+    bind_rows() %>%
+    arrange(waic)
+}
+
+saveRDS(fx.waic, here("analysis", "data", "derived_data", "model", "fx.waic.rds"))
+```
+
+## Functions for analyses of the effects of sprays in neighboring households 
+
+### Function that ranks models by WAIC compared to the WAIC of the model selected in the within-household analysis
+
+## waic baseline g20 
+
+
+```{r fx.waic.b.g20 }
+#' Difference in WAIC with WAIC from model selected in the within-household analysis as baseline
+#'
+#' This function takes a list of INLA models as input and returns their difference in WAIC between the WAIC of the model selected in the within-household analysis and all other models
+#'
+#' @param m A list of INLA models. All INLA models must include a value for the variable fixed.effect.s
+#' @return A data frame of the WAIC values and the WAIC difference for each model compared to the model selected in the within-household analysis
+
+fx.waic.b.g20 <- function(m) {
+  # Determine which of the models in the list is the model selected in the within-household analysis
+  # in this case the model with one variable: g20_day.max
+
+  # names.fixed is a vector from the INLA results that lists the fixed effects input in the model and the intercept
+  # we want to identify the INLA model that has the fixed effect g20_day.max
+  # names.fixed should look like: "Intercept" "g20_day.max"
+  # here we find the model where names.fixed has 2 elements and one of them is "g20_day.max"
+  m.g20.T <- sapply(1:length(m), function(x) {
+    length(m[[x]][["names.fixed"]]) == 2 &
+      str_detect(m[[x]][["fixed.effect.s"]], pattern = "g20_day.max")
+  })
+
+  # m.g20 is the model selected in the within-household analysis
+  m.g20 <- m[m.g20.T == TRUE]
+
+  #' Compare WAICs with model selected in the within-household analysis as baseline
+  #'
+  #' This function takes a list of INLA models as input and returns data frame of the WAIC values and the WAIC rank of each model compared to the WAIC of the model selected in the within-household analysis
+  #'
+  #' @param x An index from a list of INLA models.
+  #' @return A data frame of the WAIC values and the WAIC rank of each model compared to the model selected in the within-household analysis as baseline.
+
+  f.waic.compare <- function(x) {
+    n <- length(m[[x]][["waic"]][["local.waic"]])
+
+    waic.compare <- list(
+      # a value that lists the fixed effects in each model
+      fixed = c(paste(m[[x]][["names.fixed"]], collapse = "+")),
+      # a value that lists the fixed effects in each model without the intercept (added within in our model function, not an INLA result)
+      fixed.s = m[[x]][["fixed.effect.s"]],
+      # a value that lists the random effects in each model
+      random = c(paste(m[[x]][["model.random"]], collapse = "+")),
+      # extract waic value from each model
+      waic = m[[x]][["waic"]][["waic"]],
+      # st. error of the point-wise waic
+      s.e = as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))),
+      # lower ci of the point-wise waic
+      ci.l = m[[x]][["waic"]][["waic"]] - as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # upper ci of the point-wise waic
+      ci.u = m[[x]][["waic"]][["waic"]] + as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # difference between a model's waic and the waic of the model selected in the within-household analysis
+      d.mean.waic = m[[x]][["waic"]][["waic"]] - m.g20[[1]][["waic"]][["waic"]],
+      # st. error of the difference between a model's waic and the waic of the model selected in the within-household analysis
+      d.s.e = as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.g20[[1]][["waic"]][["local.waic"]], na.rm = TRUE))),
+      # lower ci of the difference between a model's waic and the waic of the model selected in the within-household analysis
+      ci.d.l = m[[x]][["waic"]][["waic"]] - m.g20[[1]][["waic"]][["waic"]] - as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.g20[[1]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # upper ci of the difference between a model's waic and the waic of the model selected in the within-household analysis
+      ci.d.u = m[[x]][["waic"]][["waic"]] - m.g20[[1]][["waic"]][["waic"]] + as.numeric(sqrt(n * var(m[[x]][["waic"]][["local.waic"]] - m.g20[[1]][["waic"]][["local.waic"]], na.rm = TRUE))) * 2.6,
+      # prediction penalty
+      p.waic = sum(m[[x]][["waic"]][["local.p.eff"]], na.rm = TRUE),
+      # model ID: index of the model
+      m = paste("m", x, sep = ".")
+    )
+  }
+
+  df.model <- lapply(1:length(m), f.waic.compare) %>%
+    bind_rows() %>%
+    arrange(waic)
+}
+
+saveRDS(fx.waic.b.g20, here("analysis", "data", "derived_data", "model", "fx.waic.b.g20.rds"))
+```

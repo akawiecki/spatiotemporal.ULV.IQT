@@ -1,0 +1,2 @@
+load("/Users/annakawiecki/Documents/epi/project/ulv/spatiotemporal.ULV.IQT.public/spatiotemporal.ULV.IQT/spatiotemporal.ULV.IQT/analysis/data/raw_data/data.sample.rds")
+load("/Users/annakawiecki/Documents/epi/project/ulv/spatiotemporal.ULV.IQT/spatiotemporal.ULV.IQT/analysis/data/raw_data/gis.buff.sample.14.rds")

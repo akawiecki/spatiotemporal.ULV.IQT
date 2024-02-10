@@ -1,0 +1,929 @@
+---
+title: "model.prior.sensitivity.analysis.14"
+author: "Ania Kawiecki"
+date: "2023-08-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries}
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(INLA)
+library(parallel)
+```
+
+```{r import functions}
+fx.waic.b.g20 <- readRDS("/Users/annakawiecki/Documents/epi/project/ulv/ulv_iquitos/model/fx.waic.b.g20.rds")
+
+fx.waic.cpo <- readRDS("/Users/annakawiecki/Documents/epi/project/ulv/ulv_iquitos/model/fx.waic.cpo.rds")
+
+fx.fix.eff <- readRDS("/Users/annakawiecki/Documents/epi/project/ulv/ulv_iquitos/model/fx.fix.eff.rds")
+
+```
+
+## function that names the model and prior
+
+```{r}
+fx.prior.names <- function(model.list, model.name, prior.name){
+  
+ lapply(1:length(model.list), function(x)
+   append(model.list[[x]], c(model=model.name, prior=prior.name[[x]],m= paste("m", x, sep="." )) ))
+   #append(model.list[[x]], c(model.name, prior.name[[x]]) ))
+}
+
+```
+
+## functions that extract prior and type of model into df
+
+```{r fx.fe.prior}
+
+fx.fe.prior <- function(m){
+  
+# f.fix.eff.exp extracts fixed effect from INLA model and names model 
+f.fe.prior <- function(x){
+  round(exp(m[[x]][["summary.fixed"]]), digits = 2) %>% 
+    #because the variable names come as rownames in the inla results, 
+    #this adds a col named "variable" with the rowname 
+  rownames_to_column( var = "variable") %>% 
+    #creates col with the names of the fixed effects 
+    mutate(fixed= paste(m[[x]][["names.fixed"]], collapse= "+"), 
+           #creates col with the names of the random effects 
+           fixed.s= m[[x]][["fixed.effect.s"]],
+            #m= paste("m", x, sep="." ), 
+           #for some reason m screws things up no idea why 
+           model= m[[x]][["model"]], 
+           prior= m[[x]][["prior"]]) %>% 
+    # renames awkward inla results quantile column names
+    rename(q0.025 = "0.025quant", q0.5 = "0.5quant", q0.975 = "0.975quant") 
+}
+
+lapply(1:length(m), f.fe.prior) %>% bind_rows()
+
+}
+```
+
+```{r fe.waic.prior}
+
+fx.waic.prior <- function(m){
+  # function that finsd the model with the lowest AIC from a list of models 
+  f.waic.min <- function(m){
+    
+    #find the smallest waic value among the models 
+    min.waic <- min(unlist(lapply(1:length(m), function (x){
+      m[[x]][["waic"]][["waic"]]
+    } )))
+    
+    # condition: is the model waic == the lowest waic?
+    min.waic.T <- sapply(1:length(m), function(x) m[[x]][["waic"]][["waic"]] == min.waic )
+    
+    # select the model where the waic == the lowest waic is TRUE
+    m.min.waic <- m[min.waic.T==TRUE]
+  }
+  
+  m.min.waic <- f.waic.min(m)
+  
+  
+  f.waic.compare <- function(x){
+    
+    n= length(m[[x]][["waic"]][["local.waic"]])
+    
+    waic.compare <- list( 
+      
+      fixed= c(paste(m[[x]][["names.fixed"]], collapse= "+")),
+      #fixed.s= m[[x]][["fixed.effect.s"]],
+      model= m[[x]][["model"]], 
+      prior= m[[x]][["prior"]],
+      #random= c(paste(m[[x]][["model.random"]], collapse= "+")),
+      #the models with different buffer sizes should have a list "buffer" after having been modified with f.buff.flat
+      buffer= m[[x]][["buffer"]],
+      #extract waic 
+      waic= m[[x]][["waic"]][["waic"]],
+      # st. error of the pointwise waic
+      s.e = as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]], na.rm = TRUE ) ) ),
+      # lower ci of the pointwise waic
+      ci.l= m[[x]][["waic"]][["waic"]] - as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]], na.rm = TRUE ) ) )*2.6, 
+      # upper ci of the pointwise waic
+      ci.u= m[[x]][["waic"]][["waic"]] + as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]], na.rm = TRUE ) ) )*2.6, 
+      #difference between a model's waic and the lowest waic
+      d.mean.waic= m[[x]][["waic"]][["waic"]]-m.min.waic[[1]][["waic"]][["waic"]] , 
+      #st. error of the difference between a model's waic and the lowest waic
+      d.s.e= as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]]-m.min.waic[[1]][["waic"]][["local.waic"]], na.rm = TRUE ) ) ), 
+      #lower ci of the difference between a model's waic and the lowest waic
+      ci.d.l= m[[x]][["waic"]][["waic"]]-m.min.waic[[1]][["waic"]][["waic"]] - as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]]-m.min.waic[[1]][["waic"]][["local.waic"]], na.rm = TRUE ) ) )*2.6, 
+      #upper ci of the difference between a model's waic and the lowest waic
+      ci.d.u= m[[x]][["waic"]][["waic"]]-m.min.waic[[1]][["waic"]][["waic"]] + as.numeric(sqrt( n*var( m[[x]][["waic"]][["local.waic"]]-m.min.waic[[1]][["waic"]][["local.waic"]] , na.rm = TRUE) ) )*2.6, 
+      # prediction penalty
+      p.waic= sum(m[[x]][["waic"]][["local.p.eff"]], na.rm = TRUE)
+      #cpo= -sum(log(m[[x]][["cpo"]][["cpo"]]),na.rm = TRUE),
+      #m= paste("m", x, sep="." )
+    )
+    
+  }
+  
+  df.model <-  lapply(1:length(m),f.waic.compare) %>% bind_rows() %>% arrange(waic) 
+
+}
+```
+
+
+
+```{r data }
+df <-  readRDS("/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/data/variables/e.space.14.bio.2023.rds")
+
+df <- st_transform(df, 32718)
+
+```
+
+
+#current model priors
+Prior distributions for parameters were chosen based on considerations of weak information and parsimony, using the defaults proposed in the R-INLA documentation. We assumed zero- mean Gaussian prior distributions $\beta \sim Normal(0,1000)$ for all fixed effects (A and B) and log gamma prior distributions for the iid and RW1 random effects ($\eta_{i} \sim log gamma(1, 0.00005)$ and $\delta_{t} \sim log gamma(1, 0.00005)$). For the spatial random effect we implemented a penalized complexity (PC) prior with $range = c(10,0.01)$, and $\sigma = c(1, 0.01)$. PC priors are recommended, as they reward simplicity by shrinking parameter estimates toward a "base model,", thus preventing overfitting (@simpson2015).
+
+```{r mesh and spatial field}
+## ----coords--------------------------------------------------------------------------------------------------------------------
+
+#create lat long cols 
+
+df.coord <-  cbind(lat = unlist(map(df$geometry,1)),
+           long = unlist(map(df$geometry,2)))
+
+
+## ----final mesh----------------------------------------------------------------------------------------------------------------
+bnd5 <- inla.nonconvex.hull(df.coord, concave = 200)
+mesh10 <- inla.mesh.2d(df.coord, 
+                       boundary= bnd5, 
+                       max.edge = c(50, 100),# 50m is the maximum lenght of the triangle edge
+                                            #100m outer layer with a lower triangle density where there are no points to avoid edge effect
+                       cutoff = 20, ## The cutoff is the distance at which two points will be considered as one. Useful for dataset with a lot of points clamped together
+                       min.angle = 30)
+plot(mesh10, asp = 1, main = "")
+points(df.coord, pch = 16, col = "red", cex = 0.3, lwd = 1)
+mesh <- mesh10
+
+rm(mesh10, bnd5)
+
+
+## ----a matrix spde spatial index-----------------------------------------------------------------------------------------------
+
+a1 <- inla.spde.make.A(mesh = mesh, loc= df.coord)
+
+```
+
+
+```{r pc priors for spatial}
+## ---- spde with pc priors -------------------
+
+spde2 <- inla.spde2.pcmatern(mesh = mesh, 
+                                prior.range = c(10,0.01),  # the probability that the range is less than 10 (m) is 0.01. The range here should be rather large (compare to the dataset extension) 
+                                 prior.sigma = c(1, 0.01))   # the probability that variance (on the log scale) is more that 1 is 0.01)
+
+# If i wanted to create multiple spatial fields (e.g. year-specific spatial fields), i would change the n.group and n.repl parts
+sp.index2 <- inla.spde.make.index(name= "spatial.field2", 
+                                  n.spde= spde2$n.spde, 
+                                  n.group=1,
+                                  n.repl=1)
+
+```
+
+```{r model g20.max}
+
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(g20_day.max= df[["g20_day.max"]], 
+                     location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max + f(location_code, model ="iid")+ f(month, model ="rw1")+ f(spatial.field2, model = spde2)
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+m.t.0 <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+m.t.0.names <- append(m.t.0, c(model="time", prior="original"))
+
+```
+
+
+```{r model sur}
+
+
+ stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max + i_total + f(location_code, model ="iid")+ f(month, model ="rw1")+ f(spatial.field2, model = spde2)
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+
+m.s.0 <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+m.s.0.names <- append(m.s.0, c(model="space", prior="original"))
+```
+
+
+```{r list original models}
+m.0 <- list(m.t.0.names, m.s.0.names)
+```
+
+
+# changing the priors
+
+
+## spatial prior
+For the spatial random effect we implemented a penalized complexity (PC) prior with $range = c(10,0.01)$, and $\sigma = c(1, 0.01)$. PC priors are recommended, as they reward simplicity by shrinking parameter estimates toward a "base model,", thus preventing overfitting 
+
+*Alternative spatial priors*
+
+try a range of 0.1 and of 100 
+try a variance of 0.5 and of 3 
+
+```{r list of spatial priors}
+
+priors.spatial <- list(
+spde2.1 <- inla.spde2.pcmatern(mesh = mesh, 
+                                prior.range = c(0.1,0.01),  # the probability that the range is less than 0.1 (m) is 0.01. The range here should be rather large (compare to the dataset extension) 
+                                 prior.sigma = c(1, 0.01)),   # the probability that variance (on the log scale) is more that 1 is 0.01)
+spde2.2 <- inla.spde2.pcmatern(mesh = mesh, 
+                                prior.range = c(100,0.01),  # the probability that the range is less than 100 (m) is 0.01. The range here should be rather large (compare to the dataset extension) 
+                                 prior.sigma = c(1, 0.01)) ,  # the probability that variance (on the log scale) is more that 1 is 0.01), 
+
+spde2.3 <- inla.spde2.pcmatern(mesh = mesh, 
+                                prior.range = c(10,0.01),  # the probability that the range is less than 100 (m) is 0.01. The range here should be rather large (compare to the dataset extension) 
+                                 prior.sigma = c(0.5, 0.01)),   # the probability that variance (on the log scale) is more that 0.5 is 0.01), 
+spde2.4 <- inla.spde2.pcmatern(mesh = mesh, 
+                                prior.range = c(10,0.01),  # the probability that the range is less than 100 (m) is 0.01. The range here should be rather large (compare to the dataset extension) 
+                                 prior.sigma = c(3, 0.01))   # the probability that variance (on the log scale) is more that 1 is 0.01), 
+)
+
+priors.spatial.names.vector <-  c("spde2.1", "spde2.2", "spde2.3", "spde2.4")
+```
+
+
+Model fitting is done with the lapply() function so that each prior in list prior.list is used in turn:
+
+```{r m.t.spatial}
+
+m.t.spatial <- lapply(priors.spatial, function(spde2) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(g20_day.max= df[["g20_day.max"]], 
+                     location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max + f(location_code, model ="iid")+ f(month, model ="rw1")+ f(spatial.field2, model = spde2)
+
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+c(m, spde2.prior= spde2)
+
+})
+
+
+
+m.t.spatial.names <- fx.prior.names(m.t.spatial,"time", priors.spatial.names.vector)
+
+saveRDS(m.t.spatial, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.t.spatial.14.rds")
+```
+
+```{r m.s.spatial}
+
+m.s.spatial <- lapply(priors.spatial, function(spde2) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max + i_total + f(location_code, model ="iid")+ f(month, model ="rw1")+ f(spatial.field2, model = spde2)
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+c(m, spde2.prior= spde2)
+
+})
+
+m.s.spatial.names <- fx.prior.names(m.s.spatial,"space", priors.spatial.names.vector)
+
+saveRDS(m.s.spatial, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.s.spatial.14.rds")
+```
+
+
+```{r output m.spatial, eval = FALSE}
+
+m.spatial <- c( m.0, m.t.spatial.names, m.s.spatial.names)
+
+m.spatial.fe <-  fx.fe.prior(m.spatial) 
+m.spatial.waic <- fx.waic.prior(m.spatial)
+```
+
+## rw1 prior
+We assumed log gamma prior distributions for the RW1 random effects ($\eta_{i} \sim log gamma(1, 0.00005)$ 
+
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://inla.r-inla-download.org/r-inla.org/doc/latent/rw1.pdf
+
+```{r simulate rw1, eval=FALSE}
+
+# plot the AA_TOTAL by month 
+rw1.plot <- ggplot(df, aes(x= month, y=AA_TOTAL))+
+ geom_smooth(method="gam",formula=y~s(x,bs="cs",k=4), method.args=list(family=poisson))+geom_point(alpha=0.1)
+
+rw1.plot 
+
+# simulate different sigmas for the normal prior of rw1
+rw1.1 <-inlatools::simulate_rw(sigma=0.1)
+
+plot(inlatools::select_divergence(rw1.1),link="log")
+
+rw1.2 <-inlatools::simulate_rw(sigma=0.25)
+
+plot(inlatools::select_divergence(rw1.2),link="log")
+
+rw1.3 <-inlatools::simulate_rw(sigma=0.5)
+
+plot(inlatools::select_divergence(rw1.3),link="log")
+```
+
+
+```{r list of rw1 priors}
+
+priors.rw1 <- list(
+prior.rw1.1 <- list(prior="pc.prec",param=c(u=1,0.01)), # per recommedations of INLA for rw1 pc priors for poisson
+
+#xi∼N(xi−1,σ2) with different sigmas
+prior.rw1.2 <- list(prior="pc.prec",param=c(0.25,0.05)), #per simulations
+prior.rw1.3 <- list(prior="pc.prec",param=c(0.5,0.05))  #per simulations
+)
+
+priors.rw1.names.vector <-  c("rw1.1", "rw1.2", "rw1.3")
+```
+
+
+```{r m.t.rw1}
+
+m.t.rw1 <- lapply(priors.rw1, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(g20_day.max= df[["g20_day.max"]], 
+                     location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max +
+  f(location_code, model ="iid")+
+  f(month, model ="rw1", 
+    hyper=list( theta= x) )+
+  f(spatial.field2, model = spde2)
+
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+
+})
+
+
+
+m.t.rw1.names <- fx.prior.names(m.t.rw1,"time", priors.rw1.names.vector)
+saveRDS(m.t.rw1, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.t.rw1.14.rds")
+```
+
+```{r m.s.rw1}
+
+m.s.rw1 <- lapply(priors.rw1, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max + i_total +
+  f(location_code, model ="iid")+ 
+  f(month, model ="rw1", 
+    hyper=list( theta= x) )+
+  f(spatial.field2, model = spde2)
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+})
+
+m.s.rw1.names <- fx.prior.names(m.s.rw1,"space", priors.rw1.names.vector)
+
+saveRDS(m.s.rw1, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.s.rw1.14.rds")
+```
+
+
+## iid prior
+https://inlatools.netlify.app/articles/prior
+
+We assumed log gamma prior distributions for the iid random effects $\delta_{t} \sim log gamma(1, 0.00005)$)
+
+
+```{r simulate iid, eval=FALSE}
+df.sum <- df %>% 
+  group_by(location_code) %>% 
+  summarise(sd= sd(AA_TOTAL))
+
+# plot the AA_TOTAL by month 
+iid.plot <- ggplot(df, aes(x= location_code, y=AA_TOTAL))+
+  geom_point()
+ #geom_smooth(method="gam",formula=y~s(x,bs="cs",k=4), method.args=list(family=poisson))+geom_point(alpha=0.1)
+
+iid.plot 
+
+# simulate different sigmas for the normal prior of iid
+iid.1 <-inlatools::simulate_iid(sigma=0.1)
+
+plot(iid.1,link="log")
+
+iid.2 <-inlatools::simulate_iid(sigma=1)
+
+plot(iid.2,link="log")
+
+iid.3 <-inlatools::simulate_iid(sigma=3)
+
+plot(iid.3,link="log")
+```
+
+```{r list of iid priors}
+
+priors.iid <- list(
+prior.iid.1 <- list(prior="pc.prec",param=c(0.1,0.05)), 
+prior.iid.2 <- list(prior="pc.prec",param=c(1,0.05)), 
+prior.iid.3 <- list(prior="pc.prec",param=c(3,0.05))  
+)
+
+priors.iid.names.vector <-  c("iid.1", "iid.2", "iid.3")
+```
+
+
+```{r m.t.iid}
+
+m.t.iid <- lapply(priors.iid, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(g20_day.max= df[["g20_day.max"]], 
+                     location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max +
+  f(location_code, model ="iid" ,
+   hyper=list( theta= x #list(prior="pc.prec",param=c(0.1,0.05))
+                      #list(prior="pc.prec",param=c(1,0.05))
+               ) ) +
+  f(month, model ="rw1")+
+  f(spatial.field2, model = spde2)
+
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+
+})
+
+
+
+m.t.iid.names <- fx.prior.names(m.t.iid,"time", priors.iid.names.vector)
+
+saveRDS(m.t.iid, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.t.iid.14.rds")
+```
+
+```{r m.s.iid}
+
+m.s.iid <- lapply(priors.iid, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+
+  formula <- y ~ -1 + Intercept + g20_day.max + i_total +
+f(location_code, model ="iid" ,
+   hyper=list( theta= x #list(prior="pc.prec",param=c(0.1,0.05))
+                      #list(prior="pc.prec",param=c(1,0.05))
+               ) ) +
+  f(month, model ="rw1")+
+  f(spatial.field2, model = spde2)
+
+
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T)
+           )
+
+})
+
+m.s.iid.names <- fx.prior.names(m.s.iid,"space", priors.iid.names.vector)
+
+saveRDS(m.s.iid, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.s.iid.14.rds")
+```
+
+## fixed effects 
+We assumed zero- mean Gaussian prior distributions $\beta \sim Normal(0,1000)$ for all fixed effects
+
+As with binomial models, the transformation
+of scale between the scale of the linear model and the count scale of the outcome means that something flat on the linear model scale will not be flat on the outcome scale. Let’s consider for example just a model with an intercept and a vague Normal(0,10) prior on it:
+Ti ∼ Poisson(λi) log λi = α
+α ∼ Normal(0, 10)
+What does this prior look like on the outcome scale, λ? If α has a normal distribution, then λ has a log-normal distribution.
+
+### fe.g20
+```{r simulate fe.g20, eval=FALSE}
+
+# plot the AA_TOTAL by month 
+fe.g20.plot <- ggplot(df, aes(x= g20_day.max, y=AA_TOTAL))+
+ geom_point()
+
+fe.g20.plot 
+
+fe.0 <- curve( dlnorm( x , 0 , 1000 ) , from=0 , to=100 , n=200 )
+
+#the mean of a log-normal distribution is exp(μ + σ2/2)
+
+mean.fe.0 <- 0+(1000^2/2)
+#5e+05
+
+fe.1 <- curve( dlnorm( x , 0 , 10 ) , from=0 , to=100 , n=200 )
+
+mean.fe.1 <- 0+(10^2/2)
+#50
+
+fe.2 <- curve( dlnorm( x , 0 , 1 ) , from=0 , to=100 , n=200 )
+
+mean.fe.2 <- 0+(1^2/2)
+#0.5
+
+fe.3 <- curve( dlnorm( x , 0 , 0.5 ) , from=0 , to=100 , n=200 )
+
+mean.fe.3 <- 0+(0.5^2/2)
+#0.125
+```
+
+```{r list of fe.g20 priors}
+
+priors.fe.g20 <- list(
+prior.fe.g20.1 <- list(
+        mean= list(g20_day.max= 0),
+        prec= list(g20_day.max= 10)),
+prior.fe.g20.2 <- list(
+        mean= list(g20_day.max= 0),
+        prec= list(g20_day.max= 1)), 
+prior.fe.g20.3 <- list(
+        mean= list(g20_day.max= 0),
+        prec= list(g20_day.max= 0.5))) #per simulations
+
+
+priors.fe.g20.names.vector <-  c("fe.g20.1", "fe.g20.2", "fe.g20.3")
+```
+
+
+```{r m.t.fe.g20}
+
+m.t.fe.g20 <- lapply(priors.fe.g20, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(g20_day.max= df[["g20_day.max"]], 
+                     location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+  
+formula <- y ~ -1 + Intercept + g20_day.max +
+  f(location_code, model ="iid") +
+  f(month, model ="rw1")+
+  f(spatial.field2, model = spde2)
+
+  # the spatial effect is specified using the spde tag (which is why we don't use the "" for it)
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T), 
+          control.fixed = x
+           )
+
+
+})
+
+
+
+m.t.fe.g20.names <- fx.prior.names(m.t.fe.g20,"time", priors.fe.g20.names.vector)
+
+saveRDS(m.t.fe.g20, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.t.fe.g20.14.rds")
+```
+
+```{r m.s.fe.g20}
+
+m.s.fe.g20 <- lapply(priors.fe.g20, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+
+  formula <- y ~ -1 + Intercept + g20_day.max + i_total +
+f(location_code, model ="iid") +
+  f(month, model ="rw1")+
+  f(spatial.field2, model = spde2)
+
+
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T), 
+          control.fixed = x
+           )
+
+})
+
+m.s.fe.g20.names <- fx.prior.names(m.s.fe.g20,"space", priors.fe.g20.names.vector)
+
+saveRDS(m.s.fe.g20, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.s.fe.g20.14.rds")
+```
+
+### fe.itotal
+```{r simulate fe.itotal, eval=FALSE}
+
+# plot the AA_TOTAL by month 
+fe.itotal.plot <- ggplot(df, aes(x= i_total, y=AA_TOTAL))+
+ geom_point()
+
+fe.itotal.plot 
+
+fe.0 <- curve( dlnorm( x , 0 , 1000 ) , from=0 , to=100 , n=200 )
+
+#the mean of a log-normal distribution is exp(μ + σ2/2)
+
+mean.fe.0 <- 0+(1000^2/2)
+#5e+05
+
+fe.1 <- curve( dlnorm( x , 0 , 10 ) , from=0 , to=100 , n=200 )
+
+mean.fe.1 <- 0+(10^2/2)
+#50
+
+fe.2 <- curve( dlnorm( x , 0 , 1 ) , from=0 , to=100 , n=200 )
+
+mean.fe.2 <- 0+(1^2/2)
+#0.5
+
+fe.3 <- curve( dlnorm( x , 0 , 0.5 ) , from=0 , to=100 , n=200 )
+
+mean.fe.3 <- 0+(0.5^2/2)
+#0.125
+```
+
+```{r list of fe.itotal priors, eval= FALSE}
+
+priors.fe.itotal <- list(
+prior.fe.itotal.1 <- list(
+        mean= list(i_total= 0),
+        prec= list(i_total= 10)),
+prior.fe.itotal.2 <- list(
+        mean= list(i_total= 0),
+        prec= list(i_total= 1)), 
+prior.fe.itotal.3 <- list(
+        mean= list(i_total= 0),
+        prec= list(i_total= 0.5))) #per simulations
+
+
+priors.fe.itotal.names.vector <-  c("fe.itotal.1", "fe.itotal.2", "fe.itotal.3")
+```
+
+
+
+```{r m.s.fe.itotal, eval= FALSE}
+
+m.s.fe.itotal <- lapply(priors.fe.itotal, function(x) {
+  
+  stack <- inla.stack(
+  data= list(y= list(df[["AA_TOTAL"]])), 
+  #response variable
+  A = list(a1,1), 
+  # the projector matrix (for the spatial effect) and a linear vector (1) for the other effects
+  # the effects are organised in a list of lists. 
+  effects= list(c(sp.index2, list(Intercept= 1)),
+                list(i_total= df[["i_total"]], 
+                  g20_day.max= df[["g20_day.max"]],
+                  location_code = df[["location_code"]], 
+                     month= df[["month"]])),
+                    #and then all the other effects
+  tag= "est")
+  # The tag specify the name of this stack
+                    #and then all the other effects
+
+  formula <- y ~ -1 + Intercept + g20_day.max + i_total +
+f(location_code, model ="iid") +
+  f(month, model ="rw1")+
+  f(spatial.field2, model = spde2)
+
+
+m <- inla(formula, 
+           data = inla.stack.data(stack, 
+                                  spde=spde2), 
+           family= "nbinomial",
+           control.family=list(link='log'),
+           control.compute = list(cpo= TRUE, dic= TRUE, waic=TRUE), 
+           control.predictor = list(link=1, A= inla.stack.A(stack), 
+                                    compute=T), 
+          control.fixed = x
+           )
+
+})
+
+m.s.fe.itotal.names <- fx.prior.names(m.s.fe.itotal,"space", priors.fe.itotal.names.vector)
+
+saveRDS(m.s.fe.itotal, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.s.fe.itotal.14.rds")
+```
+
+```{r output final}
+
+m.all<- c( m.0, m.t.spatial.names, m.s.spatial.names,
+           m.t.rw1.names, m.s.rw1.names, 
+           m.t.iid.names, m.s.iid.names, 
+
+           m.t.fe.g20.names, m.s.fe.g20.names ) #,
+          #m.s.fe.itotal)
+
+
+m.all.fe <-  fx.fe.prior(m.all) 
+m.all.waic <- fx.waic.prior(m.all)
+
+saveRDS(m.all.fe, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.all.fe.14.rds")
+saveRDS(m.all.waic, "/Volumes/GoogleDrive/My\ Drive/epi/projects/ulv/ulv_data/ulv_rds_files/model/sensitivity.analysis/m.all.waic.14.rds")
+```
+
+
+
