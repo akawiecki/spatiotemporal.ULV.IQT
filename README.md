@@ -11,16 +11,6 @@ This repository contains the data and code for our paper:
 > *`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`*.
 > Name of journal/book <https://doi.org/xxx/xxx>
 
-This project analyzes data from two large-scale experiments that
-involved six cycles of indoor pyrethroid spray applications in two years
-in the Amazonian city of Iquitos, Peru. We developed spatial multi-level
-models to disentangle the reduction in Ae. aegypti abundance that
-resulted from (1) recent ULV treatment within households and (2) ULV
-treatment of adjacent or nearby households. We compared fits of models
-across a range of candidate weighting schemes for the spray effect,
-based on different temporal and spatial decay functions to understand
-lagged ULV effects.
-
 ## Contents
 
 The **analysis** directory contains:
@@ -360,7 +350,7 @@ Please cite this compendium as:
 
 > Kawiecki, (2024). *Compendium of R code and data for
 > `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`*.
-> Accessed 09 Feb 2024. Online at <https://doi.org/xxx/xxx>
+> Accessed 16 Feb 2024. Online at <https://doi.org/xxx/xxx>
 
 ## How to run in your browser or download and run locally
 
