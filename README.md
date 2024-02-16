@@ -3,8 +3,6 @@
 
 # Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh///master?urlpath=rstudio)
-
 This repository contains the data and code for our paper:
 
 > Anna B. Kawiecki1, Amy C. Morrison, Christopher M. Barker, (2024).
@@ -181,10 +179,7 @@ Extract WAIC and use these to compare candidate models
 *Outputs*: “waic.time.13.rds”, “f.e.time.13.rds”, “waic.time.14.rds”,
 “f.e.time.14.rds”
 
-Select the best fitting model or $m_{best}$; using the study data this
-was the model including as variable *a* the weight of the time since the
-most recent spray event according to a Gaussian function with 𝜎 = 20 or
-$$f_{gaussian,\sigma=20}(\Delta t_{c})=max(e^{-\frac{\Delta t_{c}^2}{2\times20^2}})$$
+Select the best fitting model or $m_{best}$
 
 ### Effects of sprays in neighboring households (*b*)
 
@@ -192,8 +187,7 @@ $$f_{gaussian,\sigma=20}(\Delta t_{c})=max(e^{-\frac{\Delta t_{c}^2}{2\times20^2
 
 Recommended to run on multiple cores to reduce computation time
 
-- <u>1.1 For *b* representing different possible decay rates of the
-  spray effect over space:</u>
+- <u>1.1 For *b*: decay rates of the spray effect over space:</u>
 
 [vbles.space.decay.13.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.decay.13.R),
 [vbles.space.decay.14.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.decay.14.R)
@@ -202,8 +196,8 @@ Recommended to run on multiple cores to reduce computation time
 
 *Outputs*: “vbles.space.decay.13.rds”,“vbles.space.decay.14.rds”
 
-- <u>1.2 For *b* representing the proportion houses sprayed within a
-  given distance ring:</u>
+- <u>1.2 For *b*: the proportion houses sprayed within a given distance
+  ring:</u>
 
 [vbles.space.ring.13.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.ring.13.R),
 [vbles.space.ring.14.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.ring.14.R)
@@ -374,6 +368,4 @@ packages this analysis depends on (also listed in the
 **Code :** See the [DESCRIPTION](DESCRIPTION) file
 
 **Data :** De-identified data sets are available upon request to the
-corresponding author according to the program funder data access and
-sharing policy. Data are located in a secure database located at the
-University of California, Davis.
+corresponding author.
