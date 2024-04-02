@@ -58,7 +58,7 @@ fx.fix.eff <- function(m) {
   lapply(1:length(m), f.fix.eff.exp) %>% bind_rows()
 }
 
-saveRDS(fx.fix.eff, here("analysis", "data", "derived_data", "model", "fx.fix.eff.rds"))
+#saveRDS(fx.fix.eff, here("analysis", "data", "derived_data", "model", "fx.fix.eff.rds"))
 ```
 
 
@@ -142,7 +142,7 @@ fx.waic <- function(m) {
     arrange(waic)
 }
 
-saveRDS(fx.waic, here("analysis", "data", "derived_data", "model", "fx.waic.rds"))
+#saveRDS(fx.waic, here("analysis", "data", "derived_data", "model", "fx.waic.rds"))
 ```
 
 ## Functions for analyses of the effects of sprays in neighboring households 
@@ -221,5 +221,12 @@ fx.waic.b.g20 <- function(m) {
     arrange(waic)
 }
 
-saveRDS(fx.waic.b.g20, here("analysis", "data", "derived_data", "model", "fx.waic.b.g20.rds"))
+#saveRDS(fx.waic.b.g20, here("analysis", "data", "derived_data", "model", "fx.waic.b.g20.rds"))
 ```
+
+
+```{r  convert roxygen comments}
+library(devtools)
+devtools::document()
+```
+

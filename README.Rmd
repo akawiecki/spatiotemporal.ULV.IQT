@@ -18,7 +18,7 @@ Title <- "Title of your paper goes here"
 
 This repository contains the data and code for our paper:
 
-> Anna B. Kawiecki1, Amy C. Morrison, Christopher M. Barker, (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Name of journal/book <https://doi.org/xxx/xxx>
+> Anna B. Kawiecki, Amy C. Morrison, Christopher M. Barker, (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Name of journal/book <https://doi.org/xxx/xxx>
 
 ## Contents 
 
@@ -314,12 +314,6 @@ This research compendium has been developed using the statistical programming
 language R. To work with the compendium, you will need
 installed on your computer the [R software](https://cloud.r-project.org/)
 itself and optionally [RStudio Desktop](https://rstudio.com/products/rstudio/download/).
-
-You can download the compendium as a zip from from this URL:
-[master.zip](/archive/master.zip). After unzipping:
-- open the `.Rproj` file in RStudio
-- run `devtools::install()` to ensure you have the packages this analysis depends on (also listed in the
-[DESCRIPTION](/DESCRIPTION) file).
 
 ### Licenses
 
