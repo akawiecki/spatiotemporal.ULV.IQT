@@ -344,7 +344,7 @@ Please cite this compendium as:
 > Kawiecki, (2024). *Compendium of R code and data for
 > `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`*.
 > Accessed 15 May 2024. Online at
-> <https://github.com/akawiecki/spatiotemporal.ULV.IQT>
+> <https://doi.org/10.5281/zenodo.11201015>
 
 ## How to run in your browser or download and run locally
 
