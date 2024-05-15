@@ -18,7 +18,7 @@ Title <- "Title of your paper goes here"
 
 This repository contains the data and code for our paper:
 
-> Anna B. Kawiecki, Amy C. Morrison, Christopher M. Barker, (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Name of journal/book <https://doi.org/xxx/xxx>
+> Anna B. Kawiecki, Amy C. Morrison, Christopher M. Barker, (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on *Aedes aegypti* household density`_. Parasites & Vectors <https://doi.org/10.1186/s13071-024-06308-3>
 
 ## Contents 
 
@@ -89,11 +89,11 @@ Randomized households selected within 1000m of the study households.
 
 *Outputs*: 
 
--   [fx.fix.eff](/analysis/data/derived_data/model/fx.fix.eff.rds): outputs the estimated fixed effects for each model
+-   fx.fix.eff: outputs the estimated fixed effects for each model
 
--   [fx.waic](/analysis/data/derived_data/model/fx.waic.rds): outputs the  WAIC and dWAIC for each model, where the dWAIC is the difference in WAIC between the WAIC of the current model and the WAIC of the model with the lowest WAIC
+-   fx.waic: outputs the  WAIC and dWAIC for each model, where the dWAIC is the difference in WAIC between the WAIC of the current model and the WAIC of the model with the lowest WAIC
 
--   [fx.waic.b.g20](/analysis/data/derived_data/model/fx.waic.b.g20.rds): outputs the  WAIC and dWAIC for each model, where the dWAIC is the difference in WAIC between the WAIC of the each model and the WAIC of the model selected in the within-household analysis ($m_{best}$).
+-   fx.waic.b.g20]: outputs the  WAIC and dWAIC for each model, where the dWAIC is the difference in WAIC between the WAIC of the each model and the WAIC of the model selected in the within-household analysis ($m_{best}$).
 
 ### Within-household spray effects (*a*)
 
@@ -183,7 +183,7 @@ Recommended to run on multiple cores to reduce computation time
   + <u>1.2 For *b*: the proportion houses sprayed within a given distance ring:</u>
 
 [vbles.space.ring.13.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.ring.13.R),
-[vbles.space.ring.14.R](/analysis/data/derived_data/variables/variables_2013/vbles.space.ring.14.R)
+[vbles.space.ring.14.R](/analysis/data/derived_data/variables/variables_2014/vbles.space.ring.14.R)
 
 
 *Inputs*: "vbles.time.13.rds", "gis.buff.sample.13.rds","vbles.time.14.rds", "gis.buff.sample.14.rds"
@@ -250,7 +250,7 @@ Recommended to run on multiple cores to reduce computation time.
 
 ### Develop result data sets 
 
-Under [:file\_folder: results](/analysis/data/derived_data/results/results.data.Rmd)
+Under [:file\_folder: results](/analysis/data/derived_data/results/)
 
 **1. Wrangle model summary data for figures and supplementary materials**
 
@@ -305,7 +305,7 @@ Under [:file\_folder:supplementary-materials](/analysis/supplementary-materials)
 
 Please cite this compendium as:
 
-> Kawiecki, (`r format(Sys.Date(), "%Y")`). _Compendium of R code and data for `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://doi.org/xxx/xxx>
+> Kawiecki, (`r format(Sys.Date(), "%Y")`). _Compendium of R code and data for `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://github.com/akawiecki/spatiotemporal.ULV.IQT?tab=readme-ov-file> or at zenodo 10.5281/zenodo.10914271
 
 
 ## How to run in your browser or download and run locally
