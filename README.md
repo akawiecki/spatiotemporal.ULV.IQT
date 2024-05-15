@@ -1,6 +1,8 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11201015.svg)](https://doi.org/10.5281/zenodo.11201015)
+
 # Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density
 
 This repository contains the data and code for our paper:
