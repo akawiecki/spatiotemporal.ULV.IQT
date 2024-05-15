@@ -18,7 +18,7 @@ Title <- "Title of your paper goes here"
 
 This repository contains the data and code for our paper:
 
-> Anna B. Kawiecki, Amy C. Morrison, Christopher M. Barker, (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on *Aedes aegypti* household density`_. Parasites & Vectors <https://doi.org/10.1186/s13071-024-06308-3>
+> Anna B. Kawiecki, Amy C. Morrison, Christopher M. Barker (2024). _`Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Parasites & Vectors <https://doi.org/10.1186/s13071-024-06308-3>
 
 ## Contents 
 
@@ -305,7 +305,7 @@ Under [:file\_folder:supplementary-materials](/analysis/supplementary-materials)
 
 Please cite this compendium as:
 
-> Kawiecki, (`r format(Sys.Date(), "%Y")`). _Compendium of R code and data for `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://github.com/akawiecki/spatiotemporal.ULV.IQT?tab=readme-ov-file> or at zenodo 10.5281/zenodo.10914271
+> Kawiecki, (`r format(Sys.Date(), "%Y")`). _Compendium of R code and data for `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`_. Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://github.com/akawiecki/spatiotemporal.ULV.IQT> or <https://doi.org/10.5281/zenodo.10914271>
 
 
 ## How to run in your browser or download and run locally
