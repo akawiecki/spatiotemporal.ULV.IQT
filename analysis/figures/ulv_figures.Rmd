@@ -327,9 +327,9 @@ plot.mg20.14.red <- ggplot(mg20.14.red, aes(x = days, y = reduction)) +
   xlim(0, 60) +
   scale_y_reverse(limits = c(100, -15)) +
   annotate("text",
-    x = 40, y = 75,
+    x = 30, y = 75,
     label = TeX(
-      r"($y=0.65+0.51\times e^{-\frac{days^2}{2\times{20}^2}}$)" # add text with the model equation
+      r"($Reduction = 1 - RR = 1 - e^{-0.99 \times e^{\frac{- days^2}{2 \times 20^2}}})" # add text with the model equation
     )
   ) +
   theme_bw(

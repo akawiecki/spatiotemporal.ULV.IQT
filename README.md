@@ -304,9 +304,8 @@ materials**
 - Example distance rings around a sample house: “i.bio.rds”,
   “i.100m.rds”, “i.buffer.bio.rds”, “i.buffer.100m.rds”
 
-- Model and data frame that allow for estimation of the % reduction for
-  *Ae. Aegypti* abundance following sprays: “m.g20.14.rds”,
-  “mg20.14.red.rds”
+- Data frame that allow for estimation of the % reduction for *Ae.
+  Aegypti* abundance following sprays: “mg20.14.red.rds”
 
 - Model WAIC and fixed effects for prior sensitivity analysis:
   “fe.priors.rds”, “waic.priors.rds”
@@ -343,7 +342,7 @@ Please cite this compendium as:
 
 > Kawiecki, (2024). *Compendium of R code and data for
 > `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`*.
-> Accessed 15 May 2024. Online at
+> Accessed 21 May 2024. Online at
 > <https://doi.org/10.5281/zenodo.11201015>
 
 ## How to run in your browser or download and run locally

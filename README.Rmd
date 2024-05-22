@@ -275,7 +275,7 @@ used to weight time-since-spray: "curves.model.time.rds"
 
 - Example distance rings around a sample house: "i.bio.rds", "i.100m.rds", "i.buffer.bio.rds", "i.buffer.100m.rds"
 
-- Model and data frame that allow for estimation of the % reduction for *Ae. Aegypti* abundance following sprays: "m.g20.14.rds", "mg20.14.red.rds"
+- Data frame that allow for estimation of the % reduction for *Ae. Aegypti* abundance following sprays: "mg20.14.red.rds"
 
 - Model WAIC and fixed effects for prior sensitivity analysis: "fe.priors.rds", "waic.priors.rds"
 
