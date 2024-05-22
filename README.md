@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11201015.svg)](https://doi.org/10.5281/zenodo.11201015)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11244560.svg)](https://doi.org/10.5281/zenodo.11244560)
 
 # Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density
 
@@ -343,7 +343,7 @@ Please cite this compendium as:
 > Kawiecki, (2024). *Compendium of R code and data for
 > `Spatial and temporal analysis on the impact of ultra-low volume indoor insecticide spraying on Aedes aegypti household density`*.
 > Accessed 22 May 2024. Online at
-> <https://doi.org/10.5281/zenodo.11201015>
+> <https://doi.org/10.5281/zenodo.11244560>
 
 ## How to run in your browser or download and run locally
 
